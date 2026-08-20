@@ -1,7 +1,6 @@
 import { GameSim, CONSTANTS, WEAPONS } from './sim.mjs';
 import { Idle } from './idle.mjs';
-import { NetClient } from './net.mjs';
-import { wsUrl } from './config.js';
+import { P2PRoom } from './p2p.mjs';
 
 const CANVAS = document.getElementById('gameCanvas');
 const CTX = CANVAS.getContext('2d');
@@ -60,6 +59,7 @@ let particles = [];
 let mode = 'menu'; // menu | solo | net
 let sim = null;
 let net = null;
+let p2p = null;
 let myId = 0;
 let mapObjects = [];
 let view = null;
@@ -125,26 +125,15 @@ function startSolo() {
 
 async function startNet() {
     AudioSys.init();
-    const url = wsUrl();
-    if (!url) { startSolo(); return; }
     const btn = document.getElementById('start-btn');
     const prev = btn.innerText;
-    btn.innerText = '접속 중…';
-    const client = new NetClient(url);
-    try {
-        await client.connect();
-    } catch (e) {
-        console.warn('ws fail, solo', e);
-        btn.innerText = prev;
-        startSolo();
-        return;
-    }
-    net = client;
-    mode = 'net';
-    sim = null;
+    btn.innerText = '방 찾는 중…';
+    const room = new P2PRoom();
+    p2p = room;
+    net = null;
     particles = [];
-    client.on('welcome', (m) => { myId = m.id; });
-    client.on('start', (m) => {
+    room.on('welcome', (m) => { myId = m.id; });
+    room.on('start', (m) => {
         mapObjects = m.map || [];
         view = m.snapshot;
         AudioSys.startWind();
@@ -152,19 +141,69 @@ async function startNet() {
         lastTime = performance.now();
         requestAnimationFrame(loop);
     });
-    client.on('state', (m) => {
+    room.on('state', (m) => {
         view = m.snapshot;
         (m.events || []).forEach(handleEvent);
         if (view && view.ended) onMatchEnd(view);
     });
-    client.on('close', () => {
-        if (mode === 'net' && Idle.playing && !settled && view && !view.ended) {
+    room.on('close', () => {
+        if (mode === 'guest' && Idle.playing && !settled) {
             const p = me();
-            if (p && p.alive) { /* drop */ }
+            finishLocal('death', p, 0);
         }
     });
-    client.send({ type: 'join', ...Idle.loadout() });
-    btn.innerText = '대기 중…';
+    room.on('peer_input', (m) => {
+        if (sim) sim.setInput(m.id, m);
+    });
+    room.on('guest_left', (m) => {
+        if (sim) sim.disconnect(m.id);
+    });
+    room.on('host_ready', () => beginHostMatch(room));
+    try {
+        const info = await room.joinQuick(Idle.loadout());
+        myId = info.myId;
+        if (info.role === 'host') {
+            btn.innerText = '사람 대기 (2초)…';
+            mode = 'host';
+        } else {
+            btn.innerText = '방장 대기…';
+            mode = 'guest';
+            sim = null;
+            setTimeout(() => {
+                if (mode === 'guest' && !view) {
+                    try { room.close(); } catch (err) {}
+                    p2p = null;
+                    btn.innerText = prev;
+                    startSolo();
+                }
+            }, 8000);
+        }
+    } catch (e) {
+        console.warn('p2p fail, solo', e);
+        btn.innerText = prev;
+        try { room.close(); } catch (err) {}
+        p2p = null;
+        startSolo();
+    }
+}
+
+function beginHostMatch(room) {
+    const humans = room.humans();
+    sim = new GameSim({
+        seed: (Math.random() * 0xffffffff) >>> 0,
+        stage: Idle.save.stage,
+        humans,
+        bots: Math.max(0, CONSTANTS.SLOTS - humans.length)
+    });
+    myId = room.myId;
+    mapObjects = sim.mapSnapshot();
+    view = sim.snapshot();
+    mode = 'host';
+    room.broadcast({ type: 'start', map: mapObjects, snapshot: view });
+    AudioSys.startWind();
+    hideMenu();
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
 }
 
 function handleEvent(ev) {
@@ -197,10 +236,11 @@ function onMatchEnd(snap) {
         else outcome = 'time';
     } else outcome = 'death';
     const survived = (info && info.survived) || 0;
-    finishLocal(outcome, p, survived);
+    showResult(outcome, p, survived);
+    teardownNet();
 }
 
-function finishLocal(outcome, p, survived) {
+function showResult(outcome, p, survived) {
     if (settled) return;
     settled = true;
     Idle.playing = false;
@@ -225,9 +265,18 @@ function finishLocal(outcome, p, survived) {
         t.innerText = 'TIME OVER'; t.className = 'text-5xl font-bold text-blue-400 mb-4';
         d.innerText = `생존 성공! 처치: ${p ? p.kills : 0}${reward}`;
     }
-    mode = 'menu';
+}
+
+function teardownNet() {
     if (net) { net.close(); net = null; }
+    if (p2p) { p2p.close(); p2p = null; }
     sim = null;
+    mode = 'menu';
+}
+
+function finishLocal(outcome, p, survived) {
+    showResult(outcome, p, survived);
+    teardownNet();
 }
 
 function maybeLocalDeath(snap) {
@@ -235,8 +284,11 @@ function maybeLocalDeath(snap) {
     const p = snap.entities.find(e => e.id === myId);
     if (p && !p.alive) {
         const survived = snap.phase === 'GROUND' ? Math.max(0, CONSTANTS.GROUND_TIME - snap.time) : 0;
+        if (mode === 'host') {
+            showResult('death', p, survived);
+            return;
+        }
         finishLocal('death', p, survived);
-        if (net) { net.close(); net = null; }
     }
 }
 
@@ -403,23 +455,30 @@ function drawMinimap(snap, p) {
 function loop(now) {
     const dt = Math.min(0.05, (now - lastTime) / 1000); lastTime = now;
     if (mode === 'menu') return;
-    if (mode === 'solo' && sim) {
+    if ((mode === 'solo' || mode === 'host') && sim) {
         const inp = readInput();
         sim.setInput(myId, inp);
         sim.tick(dt);
         const events = sim.drainEvents();
         events.forEach(handleEvent);
         view = sim.snapshot();
+        if (mode === 'host' && p2p) {
+            inputAcc += dt;
+            if (inputAcc >= 0.05) {
+                inputAcc = 0;
+                p2p.broadcast({ type: 'state', snapshot: view, events });
+            }
+        }
         if (me() && me().z <= 0) {
             document.getElementById('dive-controls').style.display = 'none';
         }
         maybeLocalDeath(view);
         if (view.ended) onMatchEnd(view);
-    } else if (mode === 'net') {
+    } else if (mode === 'guest') {
         inputAcc += dt;
         if (inputAcc >= 0.05) {
             inputAcc = 0;
-            if (net) net.send({ type: 'input', ...readInput() });
+            if (p2p) p2p.send({ type: 'input', ...readInput() });
         }
         maybeLocalDeath(view);
     }
