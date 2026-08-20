@@ -18,12 +18,41 @@
         
         /* Blue Zone Hit Effect */
         #damage-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; background: radial-gradient(circle, transparent 50%, rgba(0, 100, 255, 0.3) 100%); opacity: 0; transition: opacity 0.2s; }
+        #gold-bar { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 40; pointer-events: none; font-size: 15px; letter-spacing: 0.04em; color: #ffe082; }
+        #lab-panel { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); width: 320px; max-height: min(86vh, 720px); overflow: auto; z-index: 60; pointer-events: auto; background: rgba(8,10,14,0.94); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 14px; display: none; }
+        #lab-panel.open { display: block; }
+        #lab-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+        #lab-header .title { font-weight: 800; font-size: 16px; color: #b9f6ca; }
+        #lab-gold { color: #ffd54f; font-weight: 800; }
+        #lab-stage { font-size: 12px; color: #90caf9; margin-bottom: 10px; }
+        .upg-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
+        .upg-row .meta { font-size: 12px; line-height: 1.35; }
+        .upg-row .meta b { font-size: 13px; }
+        .upg-row button { min-width: 72px; padding: 6px 8px; border-radius: 6px; font-weight: 700; font-size: 12px; }
+        .upg-row button.ok { background: #2e7d32; }
+        .upg-row button.no { background: #5d2a2a; opacity: 0.7; }
+        .upg-row button.max { background: #333; }
+        #lab-skins { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        #lab-skins button { padding: 5px 8px; border-radius: 6px; font-size: 11px; background: #333; }
+        #lab-skins button.on { outline: 2px solid #64b5f6; }
+        #lab-skins button:disabled { opacity: 0.4; }
+        #lab-stats { font-size: 11px; color: #9e9e9e; margin-top: 10px; }
+        #offline-popup { position: absolute; inset: 0; z-index: 80; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.72); pointer-events: auto; }
+        #offline-popup.open { display: flex; }
+        #offline-card { width: min(420px, 90vw); background: #1b1e24; border-radius: 12px; padding: 28px 24px; text-align: center; }
+        #offline-card h2 { color: #ffd54f; font-size: 22px; margin-bottom: 10px; }
+        #offline-card p { white-space: pre-line; margin-bottom: 18px; color: #eee; }
+        #offline-card button { background: #2e7d32; padding: 10px 28px; border-radius: 8px; font-weight: 800; }
+        @media (max-width: 900px) {
+            #lab-panel { right: 8px; left: 8px; width: auto; top: auto; bottom: 8px; transform: none; max-height: 42vh; }
+        }
     </style>
 </head>
 <body>
 
 <canvas id="gameCanvas"></canvas>
 <div id="damage-overlay"></div>
+<div id="gold-bar" class="hud-text">STAGE 1 · 40 G</div>
 
 <div id="ui-layer" class="flex flex-col justify-between p-4">
     <!-- Top HUD -->
@@ -58,8 +87,8 @@
             <h1 class="text-5xl font-bold text-green-500 mb-4 drop-shadow-lg">펍지키우기포지마스터</h1>
             <p class="text-gray-300 mb-6 max-w-md mx-auto">
                 1. <b>통합 조작</b>: 강하/달리기 모두 <b>SHIFT</b> 키 사용.<br>
-                2. <b>플레이어 전용 승리</b>: 상자 <b>7개</b> 이상 획득 시 <b>초록색 웜홀</b>로 탈출 가능!<br>
-                3. <b>생존</b>: 자기장이 매우 아픕니다(초당 90). 주의하세요!
+                2. 상자 <b>7개</b>를 먹고 <b>초록 웜홀</b>로 탈출하면 스테이지가 오릅니다.<br>
+                3. 자기장은 초당 90. 골드로는 오른쪽 <b>훈련소</b>에서 영구 강화.
             </p>
             <button id="start-btn" class="px-8 py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded text-xl shadow-lg transform transition hover:scale-105">
                 게임 시작
@@ -85,6 +114,23 @@
                 <span class="font-bold text-lg">수직<br>강하</span>
             </button>
         </div>
+    </div>
+</div>
+
+<div id="lab-panel" class="open">
+    <div id="lab-header"><div class="title">훈련소</div><div id="lab-gold">40 G</div></div>
+    <div id="lab-stage">STAGE 1</div>
+    <div id="lab-upgrades"></div>
+    <div class="text-xs text-gray-400 mt-2">스킨 (스테이지 해금)</div>
+    <div id="lab-skins"></div>
+    <div id="lab-stats"></div>
+</div>
+
+<div id="offline-popup">
+    <div id="offline-card">
+        <h2>자리비움 보상</h2>
+        <p id="offline-msg">+0 G</p>
+        <button id="offline-claim" type="button">받기</button>
     </div>
 </div>
 
@@ -164,6 +210,222 @@ const WEAPONS = {
     SHIELD: { name: '방탄방패', range: 40, damage: 10, delay: 600, defense: 0.5 }
 };
 
+const Idle = {
+    KEY: 'ppi_idle_save_v1',
+    MAX_COMMON: 25,
+    MAX_GEAR: 3,
+    OFFLINE_CAP_H: 8,
+    SKINS: [
+        { id: 'classic', name: '클래식', color: '#00BFFF', stage: 1 },
+        { id: 'lime', name: '라임', color: '#76FF03', stage: 3 },
+        { id: 'gold', name: '골드', color: '#FFD54F', stage: 5 },
+        { id: 'violet', name: '바이올렛', color: '#E040FB', stage: 8 },
+        { id: 'ghost', name: '고스트', color: '#EEEEEE', stage: 12 }
+    ],
+    save: null,
+    hubFrac: 0,
+    lastReport: null,
+    names: ['HP', 'ATK', 'SPD', 'STA', 'LUCK', 'IDLE', 'GEAR'],
+    defaultSave() {
+        return { gold: 40, stage: 1, levels: [0,0,0,0,0,0,0], skinId: 'classic', lastUnix: 0, lifetimeGold: 0, runs: 0, portalWins: 0, lastStandWins: 0 };
+    },
+    load() {
+        try {
+            const raw = localStorage.getItem(this.KEY);
+            this.save = raw ? JSON.parse(raw) : this.defaultSave();
+        } catch (e) { this.save = this.defaultSave(); }
+        if (!this.save.levels || this.save.levels.length !== 7) this.save.levels = [0,0,0,0,0,0,0];
+        if (this.save.stage < 1) this.save.stage = 1;
+        if (!this.save.skinId) this.save.skinId = 'classic';
+    },
+    persist() {
+        this.save.lastUnix = Math.floor(Date.now() / 1000);
+        localStorage.setItem(this.KEY, JSON.stringify(this.save));
+        this.refreshGold();
+    },
+    refreshGold() {
+        if (!this.save) return;
+        const bar = document.getElementById('gold-bar');
+        if (bar) bar.textContent = `STAGE ${this.save.stage} · ${this.save.gold.toLocaleString()} G`;
+        const g = document.getElementById('lab-gold');
+        if (g) g.textContent = `${this.save.gold.toLocaleString()} G`;
+    },
+    lv(i) { return this.save.levels[i] || 0; },
+    hpBonus() { return this.lv(0) * 25; },
+    playerAtkMult() { return 1 + this.lv(1) * 0.08; },
+    playerSpeedMult() { return 1 + this.lv(2) * 0.06; },
+    staminaDrainMult() { return Math.max(0.4, 1 - this.lv(3) * 0.05); },
+    staminaRecoverMult() { return 1 + this.lv(3) * 0.06; },
+    botHpMult() { return 1 + Math.max(0, this.save.stage - 1) * 0.20; },
+    botAtkMult() { return 1 + Math.max(0, this.save.stage - 1) * 0.12; },
+    botSpeedMult() { return Math.min(1.6, 1 + Math.max(0, this.save.stage - 1) * 0.04); },
+    totalLevels() { return this.save.levels.reduce((a, b) => a + b, 0); },
+    goldPerMinute() {
+        return (1.2 + this.totalLevels() * 0.4 + Math.max(0, this.save.stage - 1) * 0.7) * (1 + this.lv(5) * 0.25);
+    },
+    maxLv(i) { return i === 6 ? this.MAX_GEAR : this.MAX_COMMON; },
+    cost(i) {
+        const lv = this.lv(i);
+        if (lv >= this.maxLv(i)) return 0;
+        if (i === 6) return lv === 0 ? 80 : lv === 1 ? 250 : 600;
+        const base = [15, 20, 20, 18, 25, 20, 20][i];
+        return Math.max(1, Math.round(base * Math.pow(1.16, lv)));
+    },
+    gearLabel(lv) {
+        return ['시작: 맨손', '시작: 나이프', '시작: 소총 (30)', '시작: 소총 (45)'][lv] || '시작: 맨손';
+    },
+    desc(i) {
+        const lv = this.lv(i);
+        if (i === 0) return `+${this.hpBonus()} 최대 HP`;
+        if (i === 1) return `피해 x${this.playerAtkMult().toFixed(2)}`;
+        if (i === 2) return `이동 x${this.playerSpeedMult().toFixed(2)}`;
+        if (i === 3) return `소모 x${this.staminaDrainMult().toFixed(2)} / 회복 x${this.staminaRecoverMult().toFixed(2)}`;
+        if (i === 4) return `상자 운, 시작 파밍 +${Math.floor(lv / 4)}`;
+        if (i === 5) return `방치 x${(1 + lv * 0.25).toFixed(2)} (${this.goldPerMinute().toFixed(1)}/분)`;
+        return this.gearLabel(lv);
+    },
+    tryBuy(i) {
+        const lv = this.lv(i);
+        if (lv >= this.maxLv(i)) return false;
+        const c = this.cost(i);
+        if (this.save.gold < c) return false;
+        this.save.gold -= c;
+        this.save.levels[i] = lv + 1;
+        this.persist();
+        this.refreshUI();
+        AudioSys.playTone(520, 'sine', 0.08, 0.08);
+        return true;
+    },
+    skin() { return this.SKINS.find(s => s.id === this.save.skinId) || this.SKINS[0]; },
+    playerColor() { return this.skin().color; },
+    selectSkin(id) {
+        const s = this.SKINS.find(x => x.id === id);
+        if (!s || this.save.stage < s.stage) return;
+        this.save.skinId = id;
+        this.persist();
+        this.refreshUI();
+    },
+    rollLoot() {
+        const luck = this.lv(4);
+        let gun = 0.60 + luck * 0.03, knife = 0.20 + luck * 0.02;
+        let shield = Math.max(0.05, 1 - gun - knife);
+        const tot = gun + knife + shield, r = Math.random() * tot;
+        if (r < gun) return 'GUN';
+        if (r < gun + knife) return 'KNIFE';
+        return 'SHIELD';
+    },
+    applyLoadout(p) {
+        p.maxHp = 400 + this.hpBonus();
+        p.hp = p.maxHp;
+        p.color = this.playerColor();
+        p.lootCount = Math.floor(this.lv(4) / 4);
+        const gear = this.lv(6);
+        if (gear >= 1) {
+            p.equipWeapon(gear >= 2 ? 'GUN' : 'KNIFE');
+            if (gear >= 3 && p.weapon === 'GUN') p.ammo = 45;
+        }
+        updateHPBar();
+    },
+    addGold(n) {
+        if (n <= 0) return;
+        this.save.gold += n;
+        this.save.lifetimeGold += n;
+        this.persist();
+    },
+    settle(p, outcome, survived) {
+        this.save.runs++;
+        const kills = p ? p.kills : 0, loot = p ? p.lootCount : 0;
+        let gold = 5 + kills * 10 + loot * 4 + Math.floor(Math.max(0, survived));
+        let stageUp = false;
+        if (outcome === 'portal') { gold += 40 + this.save.stage * 10; this.save.portalWins++; stageUp = true; }
+        else if (outcome === 'last') { gold += 25 + this.save.stage * 6; this.save.lastStandWins++; stageUp = true; }
+        else if (outcome === 'time') gold += 12;
+        else gold += 3;
+        gold = Math.max(1, Math.round(gold * (1 + Math.max(0, this.save.stage - 1) * 0.08)));
+        this.addGold(gold);
+        if (stageUp) this.save.stage++;
+        this.persist();
+        this.refreshUI();
+        this.lastReport = { gold, stageUp, stage: this.save.stage, total: this.save.gold };
+        return this.lastReport;
+    },
+    collectOffline() {
+        const now = Math.floor(Date.now() / 1000);
+        if (!this.save.lastUnix) { this.save.lastUnix = now; this.persist(); return 0; }
+        const elapsed = now - this.save.lastUnix;
+        this.save.lastUnix = now;
+        if (elapsed < 60) { this.persist(); return 0; }
+        const seconds = Math.min(elapsed, this.OFFLINE_CAP_H * 3600);
+        const gold = Math.floor(this.goldPerMinute() * seconds / 60);
+        if (gold > 0) this.addGold(gold);
+        else this.persist();
+        return gold;
+    },
+    tickHub(dt) {
+        if (gameState !== 'MENU' && gameState !== 'END') return;
+        this.hubFrac += this.goldPerMinute() * dt / 60;
+        const whole = Math.floor(this.hubFrac);
+        if (whole > 0) { this.hubFrac -= whole; this.addGold(whole); }
+    },
+    showHub(on) {
+        const lab = document.getElementById('lab-panel');
+        if (lab) lab.classList.toggle('open', on);
+    },
+    refreshUI() {
+        if (!this.save) return;
+        const bar = document.getElementById('gold-bar');
+        if (bar) bar.textContent = `STAGE ${this.save.stage} · ${this.save.gold.toLocaleString()} G`;
+        const g = document.getElementById('lab-gold');
+        if (g) g.textContent = `${this.save.gold.toLocaleString()} G`;
+        const st = document.getElementById('lab-stage');
+        if (st) st.textContent = `STAGE ${this.save.stage}   봇 HP x${this.botHpMult().toFixed(2)}  ATK x${this.botAtkMult().toFixed(2)}`;
+        const stats = document.getElementById('lab-stats');
+        if (stats) stats.textContent = `판 ${this.save.runs} · 포탈 ${this.save.portalWins} · 라스트 ${this.save.lastStandWins} · 누적 ${this.save.lifetimeGold.toLocaleString()} G`;
+        const box = document.getElementById('lab-upgrades');
+        if (box) {
+            box.innerHTML = '';
+            for (let i = 0; i < 7; i++) {
+                const lv = this.lv(i), max = this.maxLv(i), c = this.cost(i);
+                const maxed = lv >= max, can = !maxed && this.save.gold >= c;
+                const row = document.createElement('div');
+                row.className = 'upg-row';
+                row.innerHTML = `<div class="meta"><b>${this.names[i]} Lv.${lv}/${max}</b><br>${this.desc(i)}</div>`;
+                const btn = document.createElement('button');
+                btn.textContent = maxed ? 'MAX' : `${c} G`;
+                btn.className = maxed ? 'max' : (can ? 'ok' : 'no');
+                btn.disabled = !can;
+                btn.onclick = () => this.tryBuy(i);
+                row.appendChild(btn);
+                box.appendChild(row);
+            }
+        }
+        const skins = document.getElementById('lab-skins');
+        if (skins) {
+            skins.innerHTML = '';
+            this.SKINS.forEach(s => {
+                const b = document.createElement('button');
+                const unlocked = this.save.stage >= s.stage;
+                b.textContent = unlocked ? s.name : `S${s.stage}`;
+                b.disabled = !unlocked;
+                if (this.save.skinId === s.id) b.classList.add('on');
+                b.style.borderLeft = `4px solid ${s.color}`;
+                b.onclick = () => this.selectSkin(s.id);
+                skins.appendChild(b);
+            });
+        }
+    },
+    init() {
+        this.load();
+        const afk = this.collectOffline();
+        this.refreshUI();
+        this.showHub(true);
+        if (afk > 0) {
+            document.getElementById('offline-msg').textContent = `자리를 비운 동안\n+${afk.toLocaleString()} G`;
+            document.getElementById('offline-popup').classList.add('open');
+        }
+    }
+};
+
 // Global State
 let gameState = 'MENU';
 let gameTime = 0, lastTime = 0;
@@ -232,8 +494,8 @@ class Entity {
         this.x = 0; this.y = 0; 
         this.z = CONSTANTS.START_ALTITUDE;
         this.radius = CONSTANTS.PLAYER_RADIUS;
-        this.color = isPlayer ? '#00BFFF' : '#FF5252';
-        this.maxHp = isPlayer ? 400 : 100;
+        this.color = isPlayer ? Idle.playerColor() : '#FF5252';
+        this.maxHp = isPlayer ? (400 + Idle.hpBonus()) : (100 * Idle.botHpMult());
         this.hp = this.maxHp;
         this.stamina = 100; this.fatigued = false; this.alive = true;
         this.weapon = 'NONE'; this.kills = 0;
@@ -262,7 +524,7 @@ class Entity {
         if (this.isDiving) rate = CONSTANTS.START_ALTITUDE / CONSTANTS.DROP_TIME_FAST;
         this.z -= rate * dt;
 
-        let spd = CONSTANTS.PLAYER_SPEED_AIR;
+        let spd = CONSTANTS.PLAYER_SPEED_AIR * (this.isPlayer ? Idle.playerSpeedMult() : 1);
         let dx = 0, dy = 0;
         if (this.isPlayer) {
             if (keys.w) dy -= 1; if (keys.s) dy += 1; if (keys.a) dx -= 1; if (keys.d) dx += 1;
@@ -318,16 +580,16 @@ class Entity {
         if (this.isPlayer) {
             let dx = 0, dy = 0;
             if (keys.w) dy -= 1; if (keys.s) dy += 1; if (keys.a) dx -= 1; if (keys.d) dx += 1;
-            let spd = CONSTANTS.PLAYER_SPEED_GROUND;
+            let spd = CONSTANTS.PLAYER_SPEED_GROUND * Idle.playerSpeedMult();
             let isMoving = (dx!==0 || dy!==0);
             
             if (this.fatigued) {
-                this.stamina += 33.3 * dt; if (this.stamina >= 100) { this.stamina = 100; this.fatigued = false; }
+                this.stamina += 33.3 * Idle.staminaRecoverMult() * dt; if (this.stamina >= 100) { this.stamina = 100; this.fatigued = false; }
             } else {
                 if (keys.shift && isMoving && this.stamina > 0) {
-                    spd *= 1.5; this.stamina -= 40 * dt; if (this.stamina <= 0) { this.stamina = 0; this.fatigued = true; }
+                    spd *= 1.5; this.stamina -= 40 * Idle.staminaDrainMult() * dt; if (this.stamina <= 0) { this.stamina = 0; this.fatigued = true; }
                 } else if (this.stamina < 100) {
-                    this.stamina += 20 * dt; if (this.stamina > 100) this.stamina = 100;
+                    this.stamina += 20 * Idle.staminaRecoverMult() * dt; if (this.stamina > 100) this.stamina = 100;
                 }
             }
             updateStaminaBar(this.stamina, this.fatigued);
@@ -366,7 +628,8 @@ class Entity {
         lootBoxes.forEach(box => {
             if (!box.active) return;
             if (Math.hypot(this.x-box.x, this.y-box.y) < this.radius + 15) {
-                this.equipWeapon(box.type); box.active = false; createParticles(box.x, box.y, '#ffd700', 10);
+                const drop = this.isPlayer ? Idle.rollLoot() : box.type;
+                this.equipWeapon(drop); box.active = false; createParticles(box.x, box.y, '#ffd700', 10);
             }
         });
     }
@@ -428,8 +691,8 @@ class Entity {
                 if (dist > desired) this.moveAI(target.x, target.y, dt);
                 else if (this.weapon === 'GUN' && dist < 100) { 
                     // Simple retreat
-                    const nx = this.x - Math.cos(this.angle) * CONSTANTS.PLAYER_SPEED_GROUND * dt;
-                    const ny = this.y - Math.sin(this.angle) * CONSTANTS.PLAYER_SPEED_GROUND * dt;
+                    const nx = this.x - Math.cos(this.angle) * CONSTANTS.PLAYER_SPEED_GROUND * Idle.botSpeedMult() * dt;
+                    const ny = this.y - Math.sin(this.angle) * CONSTANTS.PLAYER_SPEED_GROUND * Idle.botSpeedMult() * dt;
                     if (!this.checkMapCollision(nx, ny)) { this.x = nx; this.y = ny; }
                 }
             }
@@ -441,7 +704,7 @@ class Entity {
 
     // [수정] Improved AI Movement with Obstacle Avoidance
     moveAI(tx, ty, dt) {
-        const spd = CONSTANTS.PLAYER_SPEED_GROUND;
+        const spd = CONSTANTS.PLAYER_SPEED_GROUND * (this.isPlayer ? Idle.playerSpeedMult() : Idle.botSpeedMult());
         let angle = Math.atan2(ty - this.y, tx - this.x);
         
         // Check angles: 0, +30, -30, +60, -60, +90, -90 degrees
@@ -498,14 +761,19 @@ class Entity {
         }
     }
 
+    combatPower() {
+        return this.isPlayer ? Idle.playerAtkMult() : Idle.botAtkMult();
+    }
+
     attack() {
         const wData = WEAPONS[this.weapon];
         this.attackCooldown = wData.delay / 1000;
+        const dmg = wData.damage * this.combatPower();
         
         if (this.weapon === 'GUN') {
             if (this.ammo > 0) {
                 this.ammo--;
-                bullets.push(new Bullet(this.x, this.y, this.angle, this.id, wData.damage));
+                bullets.push(new Bullet(this.x, this.y, this.angle, this.id, dmg));
                 if (this.isPlayer || Math.random() < 0.3) AudioSys.playNoise(0.1, 0.3); 
             } else {
                 if (this.isPlayer) AudioSys.playTone(800, 'square', 0.05);
@@ -518,7 +786,7 @@ class Entity {
                 if (dist < wData.range) {
                     const angleDiff = Math.abs(Math.atan2(target.y-this.y, target.x-this.x) - this.angle);
                     if (angleDiff < 1.5 || angleDiff > 4.7) { 
-                        target.takeDamage(wData.damage, this);
+                        target.takeDamage(dmg, this);
                         createParticles(target.x, target.y, '#ff0000', 5);
                     }
                 }
@@ -643,6 +911,9 @@ function initGame() {
     }
     
     for(let i=0; i<30; i++) spawnRandomLootBox();
+
+    Idle.applyLoadout(player);
+    Idle.showHub(false);
 
     gameState = 'DROPPING'; gameTime = CONSTANTS.DROP_TIME_NORMAL;
     document.getElementById('center-panel').style.display = 'none';
@@ -870,9 +1141,9 @@ function drawMinimap(ctx) {
 
     if(player && player.alive) {
         const px=player.x*sc, py=player.y*sc;
-        ctx.fillStyle='#00BFFF'; ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle = Idle.playerColor(); ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
         ctx.beginPath(); ctx.moveTo(px,py); ctx.arc(px,py,15, player.angle-0.6, player.angle+0.6); 
-        ctx.fillStyle='rgba(0,191,255,0.3)'; ctx.fill();
+        ctx.fillStyle = Idle.playerColor() + '4D'; ctx.fill();
     }
     ctx.restore();
 }
@@ -897,7 +1168,20 @@ function checkWinCondition() {
 }
 
 function endGame(win, allDead = false, winnerEntity = null) {
+    if (gameState === 'END') return;
+    const fromGround = gameState === 'GROUND';
+    const survived = fromGround ? Math.max(0, CONSTANTS.GROUND_TIME - gameTime) : 0;
+    let outcome = 'death';
+    if (!win) outcome = 'death';
+    else if (allDead) outcome = 'last';
+    else if (winnerEntity) outcome = 'portal';
+    else outcome = 'time';
+
     gameState = 'END'; AudioSys.stopWind();
+    const report = Idle.settle(player, outcome, survived);
+    Idle.showHub(true);
+    const reward = report ? `\n+${report.gold} G` + (report.stageUp ? `\nSTAGE UP! 이제 ${report.stage}` : '') : '';
+
     const p = document.getElementById('center-panel');
     const t = p.querySelector('h1'); const d = p.querySelector('p');
     p.style.display = 'flex'; document.getElementById('start-btn').innerText = "다시 하기";
@@ -906,14 +1190,14 @@ function endGame(win, allDead = false, winnerEntity = null) {
         const winnerName = winnerEntity.isPlayer ? "당신" : `BOT ${winnerEntity.id}`;
         t.innerText = "PORTAL ESCAPE!";
         t.className = "text-5xl font-bold text-green-400 mb-4";
-        d.innerText = `${winnerName}이(가) 웜홀을 통해 탈출했습니다!\n완벽한 승리!`;
+        d.innerText = `${winnerName}이(가) 웜홀을 통해 탈출했습니다!\n완벽한 승리!${reward}`;
     } else if (!player.alive) {
         t.innerText = "GAME OVER"; t.className = "text-5xl font-bold text-red-600 mb-4";
-        d.innerText = `사망했습니다.\n처치 수: ${player.kills}`;
+        d.innerText = `사망했습니다.\n처치 수: ${player.kills}${reward}`;
     } else {
         t.innerText = allDead ? "WINNER WINNER!" : "TIME OVER";
         t.className = allDead ? "text-5xl font-bold text-yellow-400 mb-4" : "text-5xl font-bold text-blue-400 mb-4";
-        d.innerText = allDead ? `최후의 1인! 처치: ${player.kills}` : `생존 성공! 처치: ${player.kills}`;
+        d.innerText = (allDead ? `최후의 1인! 처치: ${player.kills}` : `생존 성공! 처치: ${player.kills}`) + reward;
     }
 }
 
@@ -949,6 +1233,22 @@ if(db){
     db.addEventListener('touchend', e=>{e.preventDefault();keys.shift=false;});
 }
 document.getElementById('start-btn').addEventListener('click', initGame);
+document.getElementById('offline-claim').addEventListener('click', () => {
+    document.getElementById('offline-popup').classList.remove('open');
+});
+Idle.init();
+setInterval(() => Idle.tickHub(0.25), 250);
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) Idle.persist();
+    else {
+        const g = Idle.collectOffline();
+        if (g > 0) {
+            document.getElementById('offline-msg').textContent = `자리를 비운 동안\n+${g.toLocaleString()} G`;
+            document.getElementById('offline-popup').classList.add('open');
+        }
+    }
+});
+window.addEventListener('beforeunload', () => Idle.persist());
 </script>
 </body>
 </html>
