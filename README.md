@@ -1,20 +1,12 @@
 # 펍지키우기포지마스터 (RETRO ROYALE)
 
-웹 리메이크. **이 PC에서 게임 서버를 띄우지 않습니다.** GitHub Pages 정적 페이지가 곧 게임입니다. 매치는 Pixi.js(WebGL)로 그립니다.
+웹 리메이크. **로컬 서버를 띄우지 않습니다.** GitHub Pages 정적 페이지가 곧 게임입니다. 매치는 Pixi.js(WebGL)로 그립니다.
 
 **Play:** https://emptypizza.github.io/ppi/
 
 원작: [gghf.itch.io/ppi](https://gghf.itch.io/ppi)
 
-## 로컬에서 열기
-
-ES 모듈이라 `index.html`을 `file://`로 열면 검은 화면 대신 안내가 뜹니다. 이 폴더에서:
-
-```bash
-python3 -m http.server 8080
-```
-
-그다음 http://127.0.0.1:8080 을 여세요. Node WebSocket 호스트는 쓰지 않습니다.
+`index.html`을 `file://`로 열면 위 주소로 안내합니다. `python3 -m http.server` 나 Node WebSocket 호스트는 쓰지 않습니다.
 
 `?solo=1` 이면 매칭을 건너뛰고 바로 1인+봇 9입니다.
 

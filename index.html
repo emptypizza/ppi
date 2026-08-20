@@ -54,10 +54,9 @@
 <body>
 
 <div id="file-serve-help">
-    <h1>로컬 서버가 필요합니다</h1>
-    <p>이 게임은 ES 모듈 + Pixi.js(WebGL)를 씁니다. <code>file://</code>로 열면 검은 화면이 됩니다. 이 폴더에서 http로 여세요. <b>이 PC를 게임 서버로 쓰지 않습니다.</b></p>
-    <pre>python3 -m http.server 8080
-# 그다음 브라우저에서 http://127.0.0.1:8080 을 여세요</pre>
+    <h1>이 파일로는 실행하지 않습니다</h1>
+    <p>ES 모듈 + Pixi.js라 <code>file://</code>로 열면 게임이 안 뜹니다. 로컬 서버도 쓰지 않습니다. 배포된 페이지에서 하세요.</p>
+    <p><a href="https://emptypizza.github.io/ppi/" style="color:#ffe082;font-size:20px">https://emptypizza.github.io/ppi/</a></p>
 </div>
 <div id="game-root"></div>
 <div id="damage-overlay"></div>
@@ -103,7 +102,7 @@
             <button id="start-btn" class="px-8 py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded text-xl shadow-lg transform transition hover:scale-105">
                 게임 시작
             </button>
-            <p id="net-hint" class="text-xs text-gray-400 mt-3">같은 시간에 시작하면 한 방. 빈자리는 봇. 이 PC에 서버를 안 띄웁니다.</p>
+            <p id="net-hint" class="text-xs text-gray-400 mt-3">같은 시간에 시작하면 한 방. 빈자리는 봇. 로컬 서버 없음.</p>
         </div>
     </div>
 
@@ -160,7 +159,7 @@
             document.body.insertAdjacentHTML('beforeend',
                 '<div style="position:fixed;inset:0;z-index:201;background:#1a202c;color:#fff;padding:40px;font-family:sans-serif">' +
                 '<h1>로드 실패</h1><pre>' + String(err) + '</pre>' +
-                '<p>http 서버로 여세요: python3 -m http.server 8080</p></div>');
+                '<p><a href="https://emptypizza.github.io/ppi/" style="color:#ffe082">https://emptypizza.github.io/ppi/</a> 에서 플레이하세요. 로컬 서버는 쓰지 않습니다.</p></div>');
         });
     }
 </script>
