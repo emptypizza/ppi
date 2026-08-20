@@ -8,6 +8,9 @@
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a202c; color: white; user-select: none; }
         canvas { display: block; }
+        #game-root { position: fixed; inset: 0; z-index: 0; }
+        #file-serve-help { display: none; position: fixed; inset: 0; z-index: 200; background: #1a202c; color: #eee; padding: 48px 24px; font-family: system-ui, sans-serif; }
+        #file-serve-help pre { background: #111; padding: 16px; border-radius: 8px; overflow: auto; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
         .pointer-events-auto { pointer-events: auto; }
         .hud-text { text-shadow: 2px 2px 0 #000; font-weight: bold; }
@@ -50,7 +53,13 @@
 </head>
 <body>
 
-<canvas id="gameCanvas"></canvas>
+<div id="file-serve-help">
+    <h1>로컬 서버가 필요합니다</h1>
+    <p>이 게임은 ES 모듈 + Pixi.js(WebGL)를 씁니다. <code>file://</code>로 열면 검은 화면이 됩니다. 이 폴더에서 http로 여세요. <b>이 PC를 게임 서버로 쓰지 않습니다.</b></p>
+    <pre>python3 -m http.server 8080
+# 그다음 브라우저에서 http://127.0.0.1:8080 을 여세요</pre>
+</div>
+<div id="game-root"></div>
 <div id="damage-overlay"></div>
 <div id="gold-bar" class="hud-text">STAGE 1 · 40 G</div>
 
@@ -136,6 +145,24 @@
     </div>
 </div>
 
-<script type="module" src="js/client.mjs"></script>
+<script>
+(function () {
+    if (location.protocol !== 'file:') return;
+    var el = document.getElementById('file-serve-help');
+    if (el) el.style.display = 'block';
+    window.__PPI_FILE_PROTOCOL__ = true;
+})();
+</script>
+<script type="module">
+    if (location.protocol !== 'file:') {
+        import('./js/client.mjs').catch(function (err) {
+            console.error(err);
+            document.body.insertAdjacentHTML('beforeend',
+                '<div style="position:fixed;inset:0;z-index:201;background:#1a202c;color:#fff;padding:40px;font-family:sans-serif">' +
+                '<h1>로드 실패</h1><pre>' + String(err) + '</pre>' +
+                '<p>http 서버로 여세요: python3 -m http.server 8080</p></div>');
+        });
+    }
+</script>
 </body>
 </html>

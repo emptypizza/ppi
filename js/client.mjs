@@ -1,9 +1,11 @@
 import { GameSim, CONSTANTS, WEAPONS } from './sim.mjs';
 import { Idle } from './idle.mjs';
-import { P2PRoom } from './p2p.mjs';
+import { createMatchView } from './view.mjs';
 
-const CANVAS = document.getElementById('gameCanvas');
-const CTX = CANVAS.getContext('2d');
+const PIXI_URL = 'https://cdn.jsdelivr.net/npm/pixi.js@8.8.1/dist/pixi.min.mjs';
+const gameRoot = document.getElementById('game-root');
+let matchView = null;
+let pixiMod = null;
 
 const AudioSys = {
     ctx: null, windNode: null, windGain: null,
@@ -54,8 +56,28 @@ const AudioSys = {
 
 const keys = { w: false, a: false, s: false, d: false, shift: false, mouse: false };
 const mousePos = { x: 0, y: 0 };
-const camera = { x: 0, y: 0, zoom: 1 };
 let particles = [];
+
+function wantSolo() {
+    try { return new URLSearchParams(location.search).has('solo'); } catch (e) { return false; }
+}
+
+async function ensureView() {
+    if (matchView) return matchView;
+    if (!pixiMod) {
+        const mod = await import(PIXI_URL);
+        pixiMod = mod.Application ? mod : (mod.default || mod);
+    }
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (gameRoot) {
+        gameRoot.style.width = w + 'px';
+        gameRoot.style.height = h + 'px';
+    }
+    matchView = await createMatchView(gameRoot, pixiMod, { width: w, height: h });
+    window.__ppi = { view: matchView, pixi: pixiMod };
+    return matchView;
+}
 let mode = 'menu'; // menu | solo | net
 let sim = null;
 let net = null;
@@ -83,8 +105,11 @@ function readInput() {
     if (keys.w) dy -= 1; if (keys.s) dy += 1; if (keys.a) dx -= 1; if (keys.d) dx += 1;
     const p = me() || (sim && sim.entity(myId));
     const px = p ? p.x : 0, py = p ? p.y : 0;
-    const wx = (mousePos.x - CANVAS.width / 2) / camera.zoom + camera.x + CANVAS.width / 2;
-    const wy = (mousePos.y - CANVAS.height / 2) / camera.zoom + camera.y + CANVAS.height / 2;
+    const vw = matchView ? matchView.width : window.innerWidth;
+    const vh = matchView ? matchView.height : window.innerHeight;
+    const zoom = 1 / (1 + ((p && p.z) || 0) / 300);
+    const wx = (mousePos.x - vw / 2) / zoom + px;
+    const wy = (mousePos.y - vh / 2) / zoom + py;
     return {
         dx, dy,
         aim: Math.atan2(wy - py, wx - px),
@@ -103,8 +128,9 @@ function hideMenu() {
     settled = false;
 }
 
-function startSolo() {
+async function startSolo() {
     AudioSys.init(); AudioSys.startWind();
+    await ensureView();
     const loadout = Idle.loadout();
     sim = new GameSim({
         seed: (Math.random() * 0xffffffff) >>> 0,
@@ -114,6 +140,7 @@ function startSolo() {
     });
     myId = 0;
     mapObjects = sim.mapSnapshot();
+    if (matchView) matchView.setMap(mapObjects);
     view = sim.snapshot();
     mode = 'solo';
     net = null;
@@ -125,9 +152,22 @@ function startSolo() {
 
 async function startNet() {
     AudioSys.init();
+    if (wantSolo()) {
+        startSolo();
+        return;
+    }
     const btn = document.getElementById('start-btn');
     const prev = btn.innerText;
     btn.innerText = '방 찾는 중…';
+    let P2PRoom;
+    try {
+        ({ P2PRoom } = await import('./p2p.mjs'));
+    } catch (e) {
+        console.warn('p2p module fail, solo', e);
+        btn.innerText = prev;
+        startSolo();
+        return;
+    }
     const room = new P2PRoom();
     p2p = room;
     net = null;
@@ -136,10 +176,13 @@ async function startNet() {
     room.on('start', (m) => {
         mapObjects = m.map || [];
         view = m.snapshot;
-        AudioSys.startWind();
-        hideMenu();
-        lastTime = performance.now();
-        requestAnimationFrame(loop);
+        ensureView().then(() => {
+            if (matchView) matchView.setMap(mapObjects);
+            AudioSys.startWind();
+            hideMenu();
+            lastTime = performance.now();
+            requestAnimationFrame(loop);
+        });
     });
     room.on('state', (m) => {
         view = m.snapshot;
@@ -189,21 +232,24 @@ async function startNet() {
 
 function beginHostMatch(room) {
     const humans = room.humans();
-    sim = new GameSim({
-        seed: (Math.random() * 0xffffffff) >>> 0,
-        stage: Idle.save.stage,
-        humans,
-        bots: Math.max(0, CONSTANTS.SLOTS - humans.length)
+    ensureView().then(() => {
+        sim = new GameSim({
+            seed: (Math.random() * 0xffffffff) >>> 0,
+            stage: Idle.save.stage,
+            humans,
+            bots: Math.max(0, CONSTANTS.SLOTS - humans.length)
+        });
+        myId = room.myId;
+        mapObjects = sim.mapSnapshot();
+        if (matchView) matchView.setMap(mapObjects);
+        view = sim.snapshot();
+        mode = 'host';
+        room.broadcast({ type: 'start', map: mapObjects, snapshot: view });
+        AudioSys.startWind();
+        hideMenu();
+        lastTime = performance.now();
+        requestAnimationFrame(loop);
     });
-    myId = room.myId;
-    mapObjects = sim.mapSnapshot();
-    view = sim.snapshot();
-    mode = 'host';
-    room.broadcast({ type: 'start', map: mapObjects, snapshot: view });
-    AudioSys.startWind();
-    hideMenu();
-    lastTime = performance.now();
-    requestAnimationFrame(loop);
 }
 
 function handleEvent(ev) {
@@ -331,125 +377,8 @@ function updateHud(snap) {
 }
 
 function draw(snap) {
-    const p = snap.entities.find(e => e.id === myId) || snap.entities[0];
-    if (!p) return;
-    const targetZoom = 1 / (1 + (p.z / 300));
-    camera.zoom = targetZoom;
-    camera.x = p.x - (CANVAS.width / 2) / camera.zoom;
-    camera.y = p.y - (CANVAS.height / 2) / camera.zoom;
-
-    CTX.fillStyle = '#D4A373'; CTX.fillRect(0, 0, CANVAS.width, CANVAS.height);
-    CTX.save();
-    CTX.translate(CANVAS.width / 2, CANVAS.height / 2);
-    CTX.scale(camera.zoom, camera.zoom);
-    CTX.translate(-p.x, -p.y);
-    CTX.strokeStyle = '#8D6E63'; CTX.lineWidth = 10;
-    CTX.strokeRect(0, 0, CONSTANTS.MAP_SIZE, CONSTANTS.MAP_SIZE);
-
-    if (snap.zone) {
-        CTX.save(); CTX.beginPath();
-        CTX.rect(-1000, -1000, CONSTANTS.MAP_SIZE + 2000, CONSTANTS.MAP_SIZE + 2000);
-        CTX.arc(snap.zone.x, snap.zone.y, snap.zone.r, 0, Math.PI * 2, true);
-        CTX.fillStyle = 'rgba(0, 100, 255, 0.2)'; CTX.fill();
-        CTX.beginPath(); CTX.arc(snap.zone.x, snap.zone.y, snap.zone.r, 0, Math.PI * 2);
-        CTX.strokeStyle = 'rgba(255,255,255,0.8)'; CTX.lineWidth = 5; CTX.stroke();
-        CTX.restore();
-    }
-    if (snap.portal) {
-        CTX.save(); CTX.translate(snap.portal.x, snap.portal.y);
-        CTX.rotate(Date.now() / 500);
-        CTX.beginPath(); CTX.arc(0, 0, snap.portal.r, 0, Math.PI * 2);
-        CTX.fillStyle = 'rgba(0,255,0,0.3)'; CTX.fill();
-        CTX.strokeStyle = '#0f0'; CTX.lineWidth = 5; CTX.setLineDash([10, 5]); CTX.stroke();
-        CTX.restore();
-    }
-    (snap.craters || []).forEach(c => {
-        CTX.fillStyle = `rgba(0,0,0,${(c.a || 0.4) * 0.4})`;
-        CTX.beginPath(); CTX.arc(c.x, c.y, c.r, 0, Math.PI * 2); CTX.fill();
-    });
-    mapObjects.forEach(obj => {
-        if (obj.type === 'BUILDING') {
-            CTX.fillStyle = '#3E2723'; CTX.fillRect(obj.x, obj.y + obj.height, obj.width, 15);
-            CTX.fillStyle = '#6D4C41'; CTX.fillRect(obj.x, obj.y, obj.width, obj.height);
-            CTX.fillStyle = '#4E342E'; CTX.fillRect(obj.x + 10, obj.y + 10, obj.width - 20, obj.height - 20);
-        } else {
-            CTX.fillStyle = '#795548';
-            CTX.beginPath(); CTX.arc(obj.x, obj.y, obj.width / 2, 0, Math.PI * 2); CTX.fill();
-        }
-    });
-    (snap.loot || []).forEach(box => {
-        CTX.save(); CTX.translate(box.x, box.y);
-        CTX.fillStyle = '#FFD700'; CTX.fillRect(-15, -15, 30, 30);
-        CTX.fillStyle = '#000'; CTX.font = '20px Arial'; CTX.textAlign = 'center'; CTX.textBaseline = 'middle';
-        CTX.fillText('?', 0, 0);
-        CTX.restore();
-    });
-    const sorted = [...snap.entities].sort((a, b) => a.z - b.z);
-    sorted.forEach(e => {
-        if (!e.alive) {
-            CTX.fillStyle = '#5D4037'; CTX.beginPath(); CTX.arc(e.x, e.y, 10, 0, Math.PI * 2); CTX.fill(); return;
-        }
-        CTX.fillStyle = 'rgba(0,0,0,0.4)'; CTX.beginPath();
-        const s = CONSTANTS.PLAYER_RADIUS * (1 - e.z / 2000);
-        CTX.arc(e.x, e.y, Math.max(2, s), 0, Math.PI * 2); CTX.fill();
-        CTX.save(); CTX.translate(e.x, e.y);
-        const sc = 1 + (e.z / 800); CTX.scale(sc, sc); CTX.rotate(e.angle);
-        if (e.id === myId && e.loot >= CONSTANTS.WIN_LOOT_COUNT) {
-            CTX.shadowBlur = 20; CTX.shadowColor = '#0f0';
-        }
-        CTX.fillStyle = e.color; CTX.beginPath(); CTX.arc(0, 0, CONSTANTS.PLAYER_RADIUS, 0, Math.PI * 2); CTX.fill();
-        CTX.shadowBlur = 0;
-        CTX.fillStyle = '#fff';
-        if (e.weapon === 'GUN') CTX.fillRect(10, -5, 20, 10);
-        else if (e.weapon === 'KNIFE') {
-            CTX.beginPath(); CTX.moveTo(10, 0); CTX.lineTo(30, 0);
-            CTX.lineWidth = 4; CTX.strokeStyle = '#CFD8DC'; CTX.stroke();
-        } else if (e.weapon === 'SHIELD') {
-            CTX.strokeStyle = '#3F51B5'; CTX.lineWidth = 4;
-            CTX.beginPath(); CTX.arc(0, 0, CONSTANTS.PLAYER_RADIUS + 8, -Math.PI / 2, Math.PI / 2); CTX.stroke();
-        } else {
-            CTX.beginPath(); CTX.arc(12, 5, 5, 0, Math.PI * 2); CTX.arc(12, -5, 5, 0, Math.PI * 2); CTX.fill();
-        }
-        if (e.diving && e.z > 0) {
-            CTX.strokeStyle = 'rgba(255,255,255,0.5)'; CTX.lineWidth = 2;
-            CTX.beginPath(); CTX.moveTo(-15, -15); CTX.lineTo(-30, -30); CTX.moveTo(-15, 15); CTX.lineTo(-30, 30); CTX.stroke();
-        }
-        CTX.restore();
-        CTX.fillStyle = '#fff'; CTX.font = 'bold 12px Arial'; CTX.textAlign = 'center';
-        CTX.fillText(e.id === myId ? (e.nick || '나') : e.nick, e.x, e.y - 30 * sc);
-        CTX.fillStyle = 'red'; CTX.fillRect(e.x - 15, e.y - 45 * sc, 30, 4);
-        CTX.fillStyle = '#0f0'; CTX.fillRect(e.x - 15, e.y - 45 * sc, 30 * (e.hp / e.maxHp), 4);
-    });
-    (snap.bullets || []).forEach(b => {
-        CTX.fillStyle = '#FFFF00'; CTX.beginPath(); CTX.arc(b.x, b.y, 4, 0, Math.PI * 2); CTX.fill();
-    });
-    particles.forEach(pt => {
-        CTX.fillStyle = pt.color; CTX.globalAlpha = pt.life;
-        CTX.beginPath(); CTX.arc(pt.x, pt.y, 3, 0, Math.PI * 2); CTX.fill(); CTX.globalAlpha = 1;
-    });
-    CTX.restore();
-    drawMinimap(snap, p);
-}
-
-function drawMinimap(snap, p) {
-    const s = 150, m = 20, sc = s / CONSTANTS.MAP_SIZE;
-    CTX.save(); CTX.translate(m, m);
-    CTX.fillStyle = 'rgba(0,0,0,0.5)'; CTX.fillRect(0, 0, s, s);
-    CTX.strokeStyle = 'rgba(255,255,255,0.8)'; CTX.lineWidth = 2; CTX.strokeRect(0, 0, s, s);
-    if (snap.zone) {
-        CTX.beginPath(); CTX.arc(snap.zone.x * sc, snap.zone.y * sc, snap.zone.r * sc, 0, Math.PI * 2);
-        CTX.strokeStyle = '#00f'; CTX.stroke();
-    }
-    if (snap.portal) {
-        CTX.fillStyle = '#0f0'; CTX.beginPath(); CTX.arc(snap.portal.x * sc, snap.portal.y * sc, 4, 0, Math.PI * 2); CTX.fill();
-    }
-    if (p && p.alive) {
-        const px = p.x * sc, py = p.y * sc;
-        CTX.fillStyle = p.color || '#00BFFF'; CTX.beginPath(); CTX.arc(px, py, 3, 0, Math.PI * 2); CTX.fill();
-        CTX.beginPath(); CTX.moveTo(px, py); CTX.arc(px, py, 15, p.angle - 0.6, p.angle + 0.6);
-        CTX.fillStyle = 'rgba(0,191,255,0.3)'; CTX.fill();
-    }
-    CTX.restore();
+    if (!matchView) return;
+    matchView.sync(snap, mapObjects, myId, particles);
 }
 
 function loop(now) {
@@ -498,8 +427,14 @@ function saveNick() {
     Idle.persist();
 }
 
-CANVAS.width = window.innerWidth; CANVAS.height = window.innerHeight;
-window.addEventListener('resize', () => { CANVAS.width = window.innerWidth; CANVAS.height = window.innerHeight; });
+window.addEventListener('resize', () => {
+    const w = window.innerWidth, h = window.innerHeight;
+    if (gameRoot) {
+        gameRoot.style.width = w + 'px';
+        gameRoot.style.height = h + 'px';
+    }
+    if (matchView) matchView.resize(w, h);
+});
 window.addEventListener('keydown', e => {
     if (e.code === 'KeyW' || e.key === 'ArrowUp') keys.w = true;
     if (e.code === 'KeyA' || e.key === 'ArrowLeft') keys.a = true;
@@ -535,6 +470,7 @@ const nick = document.getElementById('nick-input');
 if (nick) nick.addEventListener('change', saveNick);
 
 Idle.init();
+ensureView().catch((err) => console.error('pixi boot', err));
 setInterval(() => Idle.tickHub(0.25), 250);
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) Idle.persist();

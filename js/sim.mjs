@@ -544,8 +544,8 @@ export class GameSim {
     finish(outcome, winner) {
         if (this.ended) return;
         this.ended = true;
-        this.phase = 'END';
         const survived = this.phase === 'GROUND' ? Math.max(0, CONSTANTS.GROUND_TIME - this.time) : 0;
+        this.phase = 'END';
         this.endInfo = {
             outcome,
             winnerId: winner ? winner.id : null,
@@ -574,17 +574,17 @@ export class GameSim {
                     this.pushEvent({ type: 'portal_spawn', x: p.x, y: p.y });
                 }
             } else {
+                this.entities.forEach(e => {
+                    if (this.ended) return;
+                    if (e.bot || !e.alive || e.lootCount < CONSTANTS.WIN_LOOT_COUNT) return;
+                    if (Math.hypot(e.x - this.portal.x, e.y - this.portal.y) < this.portal.radius) {
+                        this.finish('portal', e);
+                    }
+                });
                 this.portal.timer -= dt;
-                if (this.portal.timer <= 0) {
+                if (!this.ended && this.portal.timer <= 0) {
                     this.portal.active = false;
                     this.pushEvent({ type: 'portal_gone' });
-                } else {
-                    this.entities.forEach(e => {
-                        if (e.bot || !e.alive || e.lootCount < CONSTANTS.WIN_LOOT_COUNT) return;
-                        if (Math.hypot(e.x - this.portal.x, e.y - this.portal.y) < this.portal.radius) {
-                            this.finish('portal', e);
-                        }
-                    });
                 }
             }
         }
