@@ -137,7 +137,12 @@ export class Entity {
         this.actionTimer = 0; this.attackCooldown = 0;
         this.lastX = 0; this.lastY = 0; this.stuckCounter = 0;
         this.angle = 0;
+        this.auto = !!opts.auto;
         this.applyStartGear();
+    }
+
+    aiControlled() {
+        return this.bot || this.auto;
     }
 
     atkMult() {
@@ -166,7 +171,7 @@ export class Entity {
 
     updateDrop(dt, input) {
         let rate = this.dropSpeed;
-        if (this.bot) {
+        if (this.aiControlled()) {
             if (this.actionTimer <= 0) {
                 this.isDiving = this.world.rand() > 0.5;
                 this.actionTimer = 0.5 + this.world.rand() * 2;
@@ -179,7 +184,7 @@ export class Entity {
 
         const spd = CONSTANTS.PLAYER_SPEED_AIR * (this.bot ? 1 : this.loadout.spdMult);
         let dx = 0, dy = 0;
-        if (this.bot) {
+        if (this.aiControlled()) {
             dx = this.world.rand() - 0.5; dy = this.world.rand() - 0.5;
         } else if (input) {
             dx = input.dx || 0; dy = input.dy || 0;
@@ -218,7 +223,7 @@ export class Entity {
             }
         }
 
-        if (this.bot) this.updateAI(dt);
+        if (this.aiControlled()) this.updateAI(dt);
         else this.updateHuman(dt, input || emptyInput());
 
         this.clamp();
@@ -469,6 +474,13 @@ export class GameSim {
 
     setInput(id, input) { this.inputs.set(id, input); }
 
+    setAuto(id, on) {
+        const e = this.entity(id);
+        if (!e || e.bot) return false;
+        e.auto = !!on;
+        return e.auto;
+    }
+
     safeSpawn() {
         for (let n = 0; n < 50; n++) {
             const x = this.rand() * (CONSTANTS.MAP_SIZE - 100) + 50;
@@ -652,7 +664,8 @@ export class GameSim {
                 x: e.x, y: e.y, z: e.z, angle: e.angle,
                 hp: e.hp, maxHp: e.maxHp, stamina: e.stamina, fatigued: e.fatigued,
                 alive: e.alive, weapon: e.weapon, ammo: e.ammo,
-                loot: e.lootCount, kills: e.kills, diving: e.isDiving
+                loot: e.lootCount, kills: e.kills, diving: e.isDiving,
+                auto: !!e.auto
             })),
             bullets: this.bullets.map(b => ({ x: b.x, y: b.y })),
             loot: this.lootBoxes.filter(b => b.active).map(b => ({ x: b.x, y: b.y })),

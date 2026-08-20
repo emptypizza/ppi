@@ -118,6 +118,20 @@ function readInput() {
     };
 }
 
+function autoOn() {
+    const btn = document.getElementById('auto-btn');
+    return !!(btn && btn.getAttribute('aria-pressed') === 'true');
+}
+
+function applyAuto(on) {
+    const btn = document.getElementById('auto-btn');
+    if (btn) {
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.classList.toggle('on', !!on);
+    }
+    if (sim) sim.setAuto(myId, on);
+}
+
 function hideMenu() {
     document.getElementById('center-panel').style.display = 'none';
     document.getElementById('dive-controls').style.display = 'flex';
@@ -126,6 +140,7 @@ function hideMenu() {
     Idle.showHub(false);
     Idle.playing = true;
     settled = false;
+    applyAuto(false);
 }
 
 async function startSolo() {
@@ -458,6 +473,16 @@ if (db) {
     db.addEventListener('mouseup', () => { keys.shift = false; });
     db.addEventListener('touchstart', e => { e.preventDefault(); keys.shift = true; });
     db.addEventListener('touchend', e => { e.preventDefault(); keys.shift = false; });
+}
+const autoBtn = document.getElementById('auto-btn');
+if (autoBtn) {
+    autoBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        applyAuto(!autoOn());
+    });
+    autoBtn.addEventListener('mousedown', (e) => { e.stopPropagation(); keys.mouse = false; });
+    autoBtn.addEventListener('mouseup', (e) => { e.stopPropagation(); keys.mouse = false; });
 }
 document.getElementById('start-btn').addEventListener('click', () => {
     saveNick();

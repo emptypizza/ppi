@@ -46,6 +46,26 @@
         #offline-card h2 { color: #ffd54f; font-size: 22px; margin-bottom: 10px; }
         #offline-card p { white-space: pre-line; margin-bottom: 18px; color: #eee; }
         #offline-card button { background: #2e7d32; padding: 10px 28px; border-radius: 8px; font-weight: 800; }
+        #auto-btn {
+            pointer-events: auto;
+            min-width: 120px;
+            padding: 10px 18px;
+            border-radius: 999px;
+            font-weight: 800;
+            font-size: 15px;
+            letter-spacing: 0.02em;
+            border: 2px solid #6b7280;
+            background: rgba(17, 24, 39, 0.88);
+            color: #d1d5db;
+            box-shadow: 0 2px 0 #111;
+        }
+        #auto-btn:hover { filter: brightness(1.12); }
+        #auto-btn[aria-pressed="true"], #auto-btn.on {
+            border-color: #69f0ae;
+            background: #1b5e20;
+            color: #b9f6ca;
+            box-shadow: 0 0 14px rgba(105, 240, 174, 0.5);
+        }
         @media (max-width: 900px) {
             #lab-panel { right: 8px; left: 8px; width: auto; top: auto; bottom: 8px; transform: none; max-height: 42vh; }
         }
@@ -118,11 +138,14 @@
                 <div id="st-bar" class="bar-fill bg-yellow-400" style="width: 100%;"></div>
             </div>
         </div>
-        <div id="dive-controls" class="hidden flex-col items-center pointer-events-auto">
-            <div class="text-sm mb-1 animate-pulse text-yellow-300">SHIFT 홀드: 급강하</div>
-            <button id="dive-btn" class="w-24 h-24 rounded-full bg-blue-600/80 border-4 border-blue-400 flex items-center justify-center active:bg-blue-800 transition">
-                <span class="font-bold text-lg">수직<br>강하</span>
-            </button>
+        <div class="flex flex-col items-center gap-3 pointer-events-auto">
+            <button id="auto-btn" type="button" aria-pressed="false" aria-label="자동전투">자동전투</button>
+            <div id="dive-controls" class="hidden flex-col items-center">
+                <div class="text-sm mb-1 animate-pulse text-yellow-300">SHIFT 홀드: 급강하</div>
+                <button id="dive-btn" class="w-24 h-24 rounded-full bg-blue-600/80 border-4 border-blue-400 flex items-center justify-center active:bg-blue-800 transition">
+                    <span class="font-bold text-lg">수직<br>강하</span>
+                </button>
+            </div>
         </div>
     </div>
 </div>

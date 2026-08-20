@@ -78,6 +78,16 @@ try {
     }, { timeout: 20000 });
     await page.waitForTimeout(400);
 
+    const auto = page.getByRole('button', { name: '자동전투' });
+    await auto.waitFor({ state: 'visible', timeout: 10000 });
+    const pressed0 = await auto.getAttribute('aria-pressed');
+    log('auto pressed before', pressed0);
+    if (pressed0 === 'true') throw new Error('자동전투 should start off');
+    await auto.click();
+    const pressed1 = await auto.getAttribute('aria-pressed');
+    log('auto pressed after click', pressed1);
+    if (pressed1 !== 'true') throw new Error('click did not turn 자동전투 on');
+
     const before = await page.evaluate(() => {
         const c = document.querySelector('#game-root canvas');
         const tmp = document.createElement('canvas');
@@ -85,9 +95,7 @@ try {
         tmp.getContext('2d').drawImage(c, 0, 0, 160, 90);
         return tmp.toDataURL('image/png');
     });
-    await page.keyboard.down('KeyD');
-    await page.waitForTimeout(500);
-    await page.keyboard.up('KeyD');
+    await page.waitForTimeout(700);
     const after = await page.evaluate(() => {
         const c = document.querySelector('#game-root canvas');
         const tmp = document.createElement('canvas');
@@ -95,8 +103,8 @@ try {
         tmp.getContext('2d').drawImage(c, 0, 0, 160, 90);
         return tmp.toDataURL('image/png');
     });
-    if (before === after) throw new Error('driven input did not change the visible frame');
-    log('ok input changed frame');
+    if (before === after) throw new Error('auto-on still frame did not change without input');
+    log('ok auto-on frame changed without WASD');
 
     await page.screenshot({ path: shot, fullPage: true });
     log('screenshot', shot);
