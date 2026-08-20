@@ -461,7 +461,7 @@ if (db) {
 }
 document.getElementById('start-btn').addEventListener('click', () => {
     saveNick();
-    startNet();
+    startSolo();
 });
 document.getElementById('offline-claim').addEventListener('click', () => {
     document.getElementById('offline-popup').classList.remove('open');
