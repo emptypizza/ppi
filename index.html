@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>펍지키우기포지마스터</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a202c; color: white; user-select: none; }
+        canvas { display: block; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .pointer-events-auto { pointer-events: auto; }
+        .hud-text { text-shadow: 2px 2px 0 #000; font-weight: bold; }
+        .leaderboard-row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 12px; }
+        .bg-glass { background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px); }
+        .bar-container { background: rgba(0,0,0,0.5); border: 2px solid #fff; border-radius: 4px; overflow: hidden; }
+        .bar-fill { height: 100%; transition: width 0.1s linear; }
+        
+        /* Blue Zone Hit Effect */
+        #damage-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; background: radial-gradient(circle, transparent 50%, rgba(0, 100, 255, 0.3) 100%); opacity: 0; transition: opacity 0.2s; }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+<div id="damage-overlay"></div>
+
+<div id="ui-layer" class="flex flex-col justify-between p-4">
+    <!-- Top HUD -->
+    <div class="flex justify-between items-start w-full">
+        <div style="width: 160px; height: 160px;"></div> <!-- Minimap Placeholder -->
+        <div class="flex flex-col items-center pt-2">
+            <div id="phase-text" class="text-xl hud-text text-yellow-400 mb-1">공중 강하 준비</div>
+            <div id="timer-display" class="text-4xl hud-text font-mono">10.0</div>
+            <div class="mt-2 text-sm hud-text opacity-80">
+                <span id="alive-counter">생존: 10</span> | <span id="kill-counter" class="text-red-400">킬: 0</span>
+            </div>
+        </div>
+        <div class="flex flex-col items-end gap-2">
+            <div class="hud-text text-right">
+                <div id="altitude-display">고도: 1000pt</div>
+                <div id="weapon-display" class="text-blue-300">무기: 없음</div>
+                <div id="loot-count-display" class="text-green-400 font-bold">파밍: 0 / 7</div>
+            </div>
+            <div id="leaderboard" class="bg-glass p-3 rounded w-48 text-gray-200 shadow-lg pointer-events-auto">
+                <div class="text-xs font-bold text-gray-400 border-b border-gray-600 mb-1 pb-1 flex justify-between">
+                    <span>플레이어</span>
+                    <span>킬</span>
+                </div>
+                <div id="leaderboard-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Center Panel -->
+    <div id="center-panel" class="absolute inset-0 flex items-center justify-center pointer-events-auto bg-black/70 z-50">
+        <div class="text-center">
+            <h1 class="text-5xl font-bold text-green-500 mb-4 drop-shadow-lg">펍지키우기포지마스터</h1>
+            <p class="text-gray-300 mb-6 max-w-md mx-auto">
+                1. <b>통합 조작</b>: 강하/달리기 모두 <b>SHIFT</b> 키 사용.<br>
+                2. <b>플레이어 전용 승리</b>: 상자 <b>7개</b> 이상 획득 시 <b>초록색 웜홀</b>로 탈출 가능!<br>
+                3. <b>생존</b>: 자기장이 매우 아픕니다(초당 90). 주의하세요!
+            </p>
+            <button id="start-btn" class="px-8 py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded text-xl shadow-lg transform transition hover:scale-105">
+                게임 시작
+            </button>
+        </div>
+    </div>
+
+    <!-- Bottom Controls -->
+    <div class="flex justify-between items-end mb-4">
+        <div class="w-48">
+            <div class="text-sm mb-1 hud-text">HP</div>
+            <div class="bar-container h-4 w-full mb-2">
+                <div id="hp-bar" class="bar-fill bg-green-500" style="width: 100%;"></div>
+            </div>
+            <div class="text-sm mb-1 hud-text">STAMINA</div>
+            <div class="bar-container h-2 w-full">
+                <div id="st-bar" class="bar-fill bg-yellow-400" style="width: 100%;"></div>
+            </div>
+        </div>
+        <div id="dive-controls" class="hidden flex-col items-center pointer-events-auto">
+            <div class="text-sm mb-1 animate-pulse text-yellow-300">SHIFT 홀드: 급강하</div>
+            <button id="dive-btn" class="w-24 h-24 rounded-full bg-blue-600/80 border-4 border-blue-400 flex items-center justify-center active:bg-blue-800 transition">
+                <span class="font-bold text-lg">수직<br>강하</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+/**
+ * Audio System
+ */
+const AudioSys = {
+    ctx: null, windNode: null, windGain: null,
+    init: function() {
+        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (this.ctx.state === 'suspended') this.ctx.resume();
+    },
+    playTone: function(freq, type, duration, vol=0.1) {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+        osc.type = type; osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.start(); osc.stop(this.ctx.currentTime + duration);
+    },
+    playNoise: function(duration, vol=0.5) { 
+        if (!this.ctx) return;
+        const buf = this.ctx.createBuffer(1, this.ctx.sampleRate * duration, this.ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i=0; i<data.length; i++) data[i] = Math.random()*2-1;
+        const src = this.ctx.createBufferSource(); src.buffer = buf;
+        const gain = this.ctx.createGain();
+        const filter = this.ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 1000;
+        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        src.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination);
+        src.start();
+    },
+    startWind: function() {
+        if (!this.ctx) return;
+        const buf = this.ctx.createBuffer(1, this.ctx.sampleRate*2, this.ctx.sampleRate);
+        const data = buf.getChannelData(0); for(let i=0; i<data.length; i++) data[i]=Math.random()*2-1;
+        this.windNode = this.ctx.createBufferSource(); this.windNode.buffer = buf; this.windNode.loop = true;
+        this.windGain = this.ctx.createGain(); this.windGain.gain.value = 0;
+        const filter = this.ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 400;
+        this.windNode.connect(filter); filter.connect(this.windGain); this.windGain.connect(this.ctx.destination);
+        this.windNode.start(); this.windFilter = filter;
+    },
+    updateWind: function(ratio) {
+        if (this.windGain) {
+            this.windGain.gain.setTargetAtTime(0.1 + ratio*0.4, this.ctx.currentTime, 0.1);
+            this.windFilter.frequency.setTargetAtTime(400 + ratio*1000, this.ctx.currentTime, 0.1);
+        }
+    },
+    stopWind: function() { if (this.windNode) { this.windNode.stop(); this.windNode = null; } }
+};
+
+/**
+ * Game Config & Constants
+ */
+const CANVAS = document.getElementById('gameCanvas');
+const CTX = CANVAS.getContext('2d');
+
+const CONSTANTS = {
+    MAP_SIZE: 3000, START_ALTITUDE: 1000,
+    DROP_TIME_NORMAL: 10, DROP_TIME_FAST: 5, GROUND_TIME: 60,
+    PLAYER_SPEED_AIR: 300, PLAYER_SPEED_GROUND: 200, PLAYER_RADIUS: 15,
+    CRATER_RADIUS: 60,
+    LOOT_SPAWN_INTERVAL: 5,
+    BLUEZONE_DAMAGE: 90, // [수정] 자기장 데미지 상향
+    WIN_LOOT_COUNT: 7,
+    PORTAL_SPAWN_TIME: 20, 
+    PORTAL_DURATION: 10
+};
+
+const WEAPONS = {
+    NONE: { name: '맨손', range: 40, damage: 5, delay: 500 },
+    KNIFE: { name: '나이프', range: 60, damage: 40, delay: 400 },
+    GUN: { name: '소총', range: 500, damage: 15, delay: 150, speed: 1200 }, 
+    SHIELD: { name: '방탄방패', range: 40, damage: 10, delay: 600, defense: 0.5 }
+};
+
+// Global State
+let gameState = 'MENU';
+let gameTime = 0, lastTime = 0;
+let hasFirstLanded = false;
+let lootSpawnTimer = 0;
+
+// Portal State
+let portal = {
+    active: false,
+    x: 0, y: 0,
+    timer: 0,
+    spawnTimer: CONSTANTS.PORTAL_SPAWN_TIME,
+    radius: 50
+};
+
+let safeZone = {
+    startX: 0, startY: 0, endX: 0, endY: 0,
+    currentX: 0, currentY: 0, startR: 0, endR: 0, currentR: 0
+};
+
+let camera = { x: 0, y: 0, zoom: 1 };
+let bullets = [], particles = [], lootBoxes = [], entities = [], mapObjects = [], craters = [];
+let player = null;
+const keys = { w: false, a: false, s: false, d: false, space: false, shift: false, mouse: false };
+const mousePos = { x: 0, y: 0 };
+
+/**
+ * Classes
+ */
+class MapObject {
+    constructor() {
+        this.x = Math.random() * CONSTANTS.MAP_SIZE;
+        this.y = Math.random() * CONSTANTS.MAP_SIZE;
+        this.type = Math.random() > 0.4 ? 'BUILDING' : 'ROCK';
+        this.width = 60 + Math.random() * 120;
+        this.height = this.type === 'BUILDING' ? 60 + Math.random() * 100 : this.width;
+        this.color = this.type === 'BUILDING' ? '#5D4037' : '#795548'; 
+    }
+    draw(ctx) {
+        ctx.fillStyle = this.color;
+        if (this.type === 'BUILDING') {
+            ctx.fillStyle = '#3E2723'; ctx.fillRect(this.x, this.y + this.height, this.width, 15); 
+            ctx.fillStyle = '#6D4C41'; ctx.fillRect(this.x, this.y, this.width, this.height);
+            ctx.fillStyle = '#4E342E'; ctx.fillRect(this.x + 10, this.y + 10, this.width - 20, this.height - 20);
+        } else {
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.width / 2, 0, Math.PI * 2); ctx.fill();
+        }
+    }
+    checkCollision(x, y, r) {
+        if (this.type === 'ROCK') {
+            const dist = Math.hypot(x - this.x, y - this.y);
+            return dist < (this.width / 2 + r);
+        } else { 
+            const nearestX = Math.max(this.x, Math.min(x, this.x + this.width));
+            const nearestY = Math.max(this.y, Math.min(y, this.y + this.height));
+            const dx = x - nearestX;
+            const dy = y - nearestY;
+            return (dx * dx + dy * dy) < (r * r);
+        }
+    }
+}
+
+class Entity {
+    constructor(isPlayer, id) {
+        this.id = id; this.isPlayer = isPlayer;
+        this.x = 0; this.y = 0; 
+        this.z = CONSTANTS.START_ALTITUDE;
+        this.radius = CONSTANTS.PLAYER_RADIUS;
+        this.color = isPlayer ? '#00BFFF' : '#FF5252';
+        this.maxHp = isPlayer ? 400 : 100;
+        this.hp = this.maxHp;
+        this.stamina = 100; this.fatigued = false; this.alive = true;
+        this.weapon = 'NONE'; this.kills = 0;
+        this.ammo = 0;
+        this.lootCount = 0; 
+        this.isDiving = false; this.dropSpeed = CONSTANTS.START_ALTITUDE / CONSTANTS.DROP_TIME_NORMAL;
+        this.actionTimer = 0; this.attackCooldown = 0;
+        this.lastX = 0; this.lastY = 0; this.stuckCounter = 0; 
+    }
+
+    update(dt) {
+        if (!this.alive) return;
+        if (this.z > 0) this.updateDrop(dt); else this.updateGround(dt);
+    }
+
+    updateDrop(dt) {
+        let rate = this.dropSpeed;
+        if (this.isPlayer) {
+            this.isDiving = keys.shift; 
+            AudioSys.updateWind(this.isDiving ? 1.0 : 0.0);
+        } else {
+            if (this.actionTimer <= 0) {
+                this.isDiving = Math.random() > 0.5; this.actionTimer = Math.random() * 2;
+            } else this.actionTimer -= dt;
+        }
+        if (this.isDiving) rate = CONSTANTS.START_ALTITUDE / CONSTANTS.DROP_TIME_FAST;
+        this.z -= rate * dt;
+
+        let spd = CONSTANTS.PLAYER_SPEED_AIR;
+        let dx = 0, dy = 0;
+        if (this.isPlayer) {
+            if (keys.w) dy -= 1; if (keys.s) dy += 1; if (keys.a) dx -= 1; if (keys.d) dx += 1;
+        } else {
+            dx = Math.random()-0.5; dy = Math.random()-0.5;
+        }
+        if (dx!==0 || dy!==0) {
+            const len = Math.sqrt(dx*dx+dy*dy);
+            this.x += (dx/len) * spd * dt; this.y += (dy/len) * spd * dt;
+        }
+        this.x = Math.max(0, Math.min(CONSTANTS.MAP_SIZE, this.x));
+        this.y = Math.max(0, Math.min(CONSTANTS.MAP_SIZE, this.y));
+
+        if (this.z <= 0) {
+            this.z = 0; this.isDiving = false;
+            if (!hasFirstLanded) {
+                hasFirstLanded = true;
+                addLog("첫 착지! 자기장이 축소되며 보급이 시작됩니다.");
+            }
+            if (this.isPlayer) { AudioSys.playNoise(0.5, 0.8); AudioSys.stopWind(); }
+            createCrater(this.x, this.y, CONSTANTS.CRATER_RADIUS, this.id);
+        }
+        
+        entities.forEach(other => {
+            if (other === this || !other.alive || other.z <= 0) return;
+            if (Math.abs(this.z - other.z) > 100) return;
+            if (Math.hypot(this.x-other.x, this.y-other.y) < this.radius*2) {
+                const angle = Math.atan2(this.y-other.y, this.x-other.x);
+                this.x = this.x + Math.cos(angle)*10; 
+                this.y = this.y + Math.sin(angle)*10;
+                
+                if (this.isDiving) { 
+                    this.isDiving = false; createParticles(this.x, this.y, '#fff', 5);
+                    if(this.isPlayer) AudioSys.playTone(150, 'sawtooth', 0.1);
+                }
+            }
+        });
+    }
+
+    updateGround(dt) {
+        if (this.attackCooldown > 0) this.attackCooldown -= dt;
+        
+        if (gameState === 'GROUND') {
+            const distToCenter = Math.hypot(this.x - safeZone.currentX, this.y - safeZone.currentY);
+            if (distToCenter > safeZone.currentR) {
+                this.takeDamage(CONSTANTS.BLUEZONE_DAMAGE * dt, null); 
+                if (this.isPlayer) document.getElementById('damage-overlay').style.opacity = 0.5 + Math.sin(Date.now()/100)*0.2;
+            } else {
+                if (this.isPlayer) document.getElementById('damage-overlay').style.opacity = 0;
+            }
+        }
+
+        if (this.isPlayer) {
+            let dx = 0, dy = 0;
+            if (keys.w) dy -= 1; if (keys.s) dy += 1; if (keys.a) dx -= 1; if (keys.d) dx += 1;
+            let spd = CONSTANTS.PLAYER_SPEED_GROUND;
+            let isMoving = (dx!==0 || dy!==0);
+            
+            if (this.fatigued) {
+                this.stamina += 33.3 * dt; if (this.stamina >= 100) { this.stamina = 100; this.fatigued = false; }
+            } else {
+                if (keys.shift && isMoving && this.stamina > 0) {
+                    spd *= 1.5; this.stamina -= 40 * dt; if (this.stamina <= 0) { this.stamina = 0; this.fatigued = true; }
+                } else if (this.stamina < 100) {
+                    this.stamina += 20 * dt; if (this.stamina > 100) this.stamina = 100;
+                }
+            }
+            updateStaminaBar(this.stamina, this.fatigued);
+
+            if (isMoving) {
+                const len = Math.sqrt(dx*dx+dy*dy);
+                const nextX = this.x + (dx/len) * spd * dt;
+                const nextY = this.y + (dy/len) * spd * dt;
+                
+                if (!this.checkMapCollision(nextX, nextY)) { this.x = nextX; this.y = nextY; }
+                else if (!this.checkMapCollision(nextX, this.y)) { this.x = nextX; }
+                else if (!this.checkMapCollision(this.x, nextY)) { this.y = nextY; }
+            }
+
+            const wx = (mousePos.x - CANVAS.width/2) / camera.zoom + camera.x + CANVAS.width/2;
+            const wy = (mousePos.y - CANVAS.height/2) / camera.zoom + camera.y + CANVAS.height/2;
+            this.angle = Math.atan2(wy - this.y, wx - this.x);
+            if (keys.mouse && this.attackCooldown <= 0) this.attack();
+            
+            let wName = WEAPONS[this.weapon].name;
+            if (this.weapon === 'GUN') wName += ` (${this.ammo})`;
+            document.getElementById('weapon-display').innerText = `무기: ${wName}`;
+            
+            document.getElementById('loot-count-display').innerText = `파밍: ${this.lootCount} / ${CONSTANTS.WIN_LOOT_COUNT}`;
+            if(this.lootCount >= CONSTANTS.WIN_LOOT_COUNT) {
+                document.getElementById('loot-count-display').classList.add('animate-pulse');
+            }
+
+        } else {
+            this.updateAI(dt);
+        }
+        
+        this.x = Math.max(0, Math.min(CONSTANTS.MAP_SIZE, this.x));
+        this.y = Math.max(0, Math.min(CONSTANTS.MAP_SIZE, this.y));
+
+        lootBoxes.forEach(box => {
+            if (!box.active) return;
+            if (Math.hypot(this.x-box.x, this.y-box.y) < this.radius + 15) {
+                this.equipWeapon(box.type); box.active = false; createParticles(box.x, box.y, '#ffd700', 10);
+            }
+        });
+    }
+
+    updateAI(dt) {
+        if (this.actionTimer > 0) this.actionTimer -= dt;
+        
+        const movedDist = Math.hypot(this.x - this.lastX, this.y - this.lastY);
+        if (movedDist < 1.0) this.stuckCounter += dt;
+        else this.stuckCounter = 0;
+        this.lastX = this.x; this.lastY = this.y;
+
+        if (this.stuckCounter > 0.5) {
+            if (this.stuckCounter > 2.0) this.stuckCounter = 0; 
+            const escapeAngle = Math.random() * Math.PI * 2;
+            const escapeX = this.x + Math.cos(escapeAngle) * 50;
+            const escapeY = this.y + Math.sin(escapeAngle) * 50;
+            // Force move attempt
+            this.x = escapeX; this.y = escapeY;
+            return;
+        }
+
+        const distToCenter = Math.hypot(this.x - safeZone.currentX, this.y - safeZone.currentY);
+        if (distToCenter > safeZone.currentR - 100) {
+            this.moveAI(safeZone.currentX, safeZone.currentY, dt);
+            this.findAndAttackEnemy(dt, true); 
+            return;
+        }
+
+        if (this.weapon === 'NONE' || (this.weapon === 'GUN' && this.ammo <= 0)) { 
+            let targetBox = null, minDist = Infinity;
+            lootBoxes.forEach(box => {
+                if (!box.active) return;
+                const d = Math.hypot(this.x-box.x, this.y-box.y);
+                if (d < minDist) { minDist = d; targetBox = box; }
+            });
+            if (targetBox) {
+                this.moveAI(targetBox.x, targetBox.y, dt);
+                this.angle = Math.atan2(targetBox.y-this.y, targetBox.x-this.x);
+            } else this.findAndAttackEnemy(dt);
+        } else this.findAndAttackEnemy(dt);
+    }
+
+    findAndAttackEnemy(dt, onlyAttack = false) {
+        let target = null, minDist = Infinity;
+        entities.forEach(e => {
+            if (e === this || !e.alive) return;
+            const d = Math.hypot(this.x-e.x, this.y-e.y);
+            if (d < minDist) { minDist = d; target = e; }
+        });
+        if (target) {
+            const dist = Math.hypot(target.x-this.x, target.y-this.y);
+            const wData = WEAPONS[this.weapon];
+            this.angle = Math.atan2(target.y-this.y, target.x-this.x);
+            
+            if (!onlyAttack) {
+                let desired = wData.range * 0.8;
+                if (this.weapon === 'GUN') desired = 250; 
+                if (dist > desired) this.moveAI(target.x, target.y, dt);
+                else if (this.weapon === 'GUN' && dist < 100) { 
+                    // Simple retreat
+                    const nx = this.x - Math.cos(this.angle) * CONSTANTS.PLAYER_SPEED_GROUND * dt;
+                    const ny = this.y - Math.sin(this.angle) * CONSTANTS.PLAYER_SPEED_GROUND * dt;
+                    if (!this.checkMapCollision(nx, ny)) { this.x = nx; this.y = ny; }
+                }
+            }
+            if (dist <= wData.range || (this.weapon === 'GUN' && dist < 600)) {
+                if (this.attackCooldown <= 0) this.attack();
+            }
+        }
+    }
+
+    // [수정] Improved AI Movement with Obstacle Avoidance
+    moveAI(tx, ty, dt) {
+        const spd = CONSTANTS.PLAYER_SPEED_GROUND;
+        let angle = Math.atan2(ty - this.y, tx - this.x);
+        
+        // Check angles: 0, +30, -30, +60, -60, +90, -90 degrees
+        const checkAngles = [0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5];
+        let moved = false;
+
+        for (let offset of checkAngles) {
+            let testAngle = angle + offset;
+            let dx = Math.cos(testAngle) * spd * dt;
+            let dy = Math.sin(testAngle) * spd * dt;
+            let nextX = this.x + dx;
+            let nextY = this.y + dy;
+
+            // Check collision with slightly larger radius for safety
+            let collided = false;
+            for (let obj of mapObjects) {
+                if (obj.checkCollision(nextX, nextY, this.radius + 5)) {
+                    collided = true; break;
+                }
+            }
+
+            if (!collided) {
+                this.x = nextX;
+                this.y = nextY;
+                moved = true;
+                break; // Found a path
+            }
+        }
+        
+        // If still stuck, increment counter in updateAI
+    }
+
+    checkMapCollision(x, y) {
+        for (let obj of mapObjects) {
+            if (obj.checkCollision(x, y, this.radius)) return true;
+        }
+        return false;
+    }
+
+    equipWeapon(type) {
+        this.lootCount++; 
+        if (this.isPlayer && this.lootCount === CONSTANTS.WIN_LOOT_COUNT) {
+            addLog("각성! 초록색 웜홀을 찾아 탈출하세요!");
+            AudioSys.playTone(400, 'triangle', 0.5);
+        }
+
+        this.weapon = type;
+        if (type === 'GUN') this.ammo = 30; else this.ammo = 0;
+        if (this.isPlayer) {
+            let msg = `획득: ${WEAPONS[type].name}`;
+            if (type === 'GUN') msg += " (30발)";
+            addLog(msg);
+            AudioSys.playTone(600, 'sine', 0.1); 
+        }
+    }
+
+    attack() {
+        const wData = WEAPONS[this.weapon];
+        this.attackCooldown = wData.delay / 1000;
+        
+        if (this.weapon === 'GUN') {
+            if (this.ammo > 0) {
+                this.ammo--;
+                bullets.push(new Bullet(this.x, this.y, this.angle, this.id, wData.damage));
+                if (this.isPlayer || Math.random() < 0.3) AudioSys.playNoise(0.1, 0.3); 
+            } else {
+                if (this.isPlayer) AudioSys.playTone(800, 'square', 0.05);
+            }
+        } else {
+            if (this.isPlayer) AudioSys.playNoise(0.05, 0.2); 
+            entities.forEach(target => {
+                if (target === this || !target.alive) return;
+                const dist = Math.hypot(target.x-this.x, target.y-this.y);
+                if (dist < wData.range) {
+                    const angleDiff = Math.abs(Math.atan2(target.y-this.y, target.x-this.x) - this.angle);
+                    if (angleDiff < 1.5 || angleDiff > 4.7) { 
+                        target.takeDamage(wData.damage, this);
+                        createParticles(target.x, target.y, '#ff0000', 5);
+                    }
+                }
+            });
+        }
+    }
+
+    takeDamage(amount, attacker) {
+        if (this.weapon === 'SHIELD') amount *= WEAPONS.SHIELD.defense;
+        this.hp -= amount;
+        if (this.isPlayer) { updateHPBar(); if(attacker) AudioSys.playTone(100, 'square', 0.1); }
+        if (this.hp <= 0 && this.alive) {
+            this.hp = 0; this.alive = false;
+            createParticles(this.x, this.y, this.color, 20);
+            if (attacker) attacker.kills++;
+            addLog(`${attacker ? (attacker.isPlayer ? "당신이" : "BOT이") : "누군가"} ${this.isPlayer ? "당신을" : "적을"} 처치함`);
+            checkWinCondition();
+        }
+    }
+}
+
+class Bullet {
+    constructor(x, y, angle, ownerId, damage) {
+        this.x = x; this.y = y;
+        this.vx = Math.cos(angle) * WEAPONS.GUN.speed;
+        this.vy = Math.sin(angle) * WEAPONS.GUN.speed;
+        this.ownerId = ownerId; this.damage = damage; this.life = 1.0;
+    }
+    update(dt) {
+        const nextX = this.x + this.vx * dt;
+        const nextY = this.y + this.vy * dt;
+        for (let obj of mapObjects) {
+            if (obj.checkCollision(nextX, nextY, 2)) { 
+                this.life = 0; createParticles(nextX, nextY, '#888', 3); return; 
+            }
+        }
+        this.x = nextX; this.y = nextY; this.life -= dt;
+    }
+}
+
+class LootBox {
+    constructor(x, y) {
+        this.x = x !== undefined ? x : Math.random() * (CONSTANTS.MAP_SIZE - 100) + 50;
+        this.y = y !== undefined ? y : Math.random() * (CONSTANTS.MAP_SIZE - 100) + 50;
+        this.active = true;
+        const r = Math.random();
+        if (r < 0.6) this.type = 'GUN'; else if (r < 0.8) this.type = 'SHIELD'; else this.type = 'KNIFE';
+    }
+}
+
+function createCrater(x, y, r, ownerId) {
+    craters.push({x, y, r, alpha: 1.0});
+    createParticles(x, y, '#555', 30);
+    entities.forEach(e => {
+        if (e.id !== ownerId && e.alive) {
+            if (e.z <= 50) { 
+                const dist = Math.hypot(e.x - x, e.y - y);
+                if (dist < r) {
+                    e.takeDamage(1000, entities.find(ow => ow.id === ownerId));
+                    addLog("착지 충격으로 적 처치!");
+                }
+            }
+        }
+    });
+}
+
+function spawnRandomLootBox() {
+    let box; let attempts = 0; let valid = false;
+    while(!valid && attempts < 10) {
+        let rx = Math.random() * (CONSTANTS.MAP_SIZE - 100) + 50;
+        let ry = Math.random() * (CONSTANTS.MAP_SIZE - 100) + 50;
+        valid = true;
+        for(let obj of mapObjects) {
+            if(obj.checkCollision(rx, ry, 15)) { valid = false; break; }
+        }
+        if(valid) box = new LootBox(rx, ry);
+        attempts++;
+    }
+    if(box) {
+        lootBoxes.push(box);
+        createParticles(box.x, box.y, '#FFD700', 10);
+    }
+}
+
+function getSafeSpawnPoint() {
+    let attempts = 0;
+    while(attempts < 50) {
+        let rx = Math.random() * (CONSTANTS.MAP_SIZE - 100) + 50;
+        let ry = Math.random() * (CONSTANTS.MAP_SIZE - 100) + 50;
+        let collided = false;
+        for(let obj of mapObjects) {
+            if(obj.checkCollision(rx, ry, CONSTANTS.PLAYER_RADIUS + 5)) {
+                collided = true; break;
+            }
+        }
+        if(!collided) return {x: rx, y: ry};
+        attempts++;
+    }
+    return {x: CONSTANTS.MAP_SIZE/2, y: CONSTANTS.MAP_SIZE/2}; 
+}
+
+/**
+ * Main Loop & Draw
+ */
+function initGame() {
+    AudioSys.init(); AudioSys.startWind();
+    entities = []; lootBoxes = []; bullets = []; particles = []; mapObjects = []; craters = [];
+    hasFirstLanded = false; lootSpawnTimer = CONSTANTS.LOOT_SPAWN_INTERVAL;
+    
+    // Portal Reset
+    portal = { active: false, x: 0, y: 0, timer: 0, spawnTimer: CONSTANTS.PORTAL_SPAWN_TIME, radius: 60 };
+
+    for(let i=0; i<60; i++) mapObjects.push(new MapObject());
+
+    for(let i=0; i<10; i++) {
+        const isPlayer = (i === 0);
+        const pos = getSafeSpawnPoint();
+        const ent = new Entity(isPlayer, i);
+        ent.x = pos.x; ent.y = pos.y;
+        entities.push(ent);
+        if(isPlayer) player = ent;
+    }
+    
+    for(let i=0; i<30; i++) spawnRandomLootBox();
+
+    gameState = 'DROPPING'; gameTime = CONSTANTS.DROP_TIME_NORMAL;
+    document.getElementById('center-panel').style.display = 'none';
+    document.getElementById('dive-controls').style.display = 'flex';
+    document.getElementById('phase-text').innerText = "공중 강하!";
+    updateHPBar(); lastTime = performance.now(); requestAnimationFrame(gameLoop);
+}
+
+function startGroundPhase() {
+    gameState = 'GROUND'; gameTime = CONSTANTS.GROUND_TIME;
+    const pt = document.getElementById('phase-text');
+    pt.innerText = "전투 시작!"; pt.classList.replace('text-yellow-400', 'text-red-500');
+    AudioSys.stopWind();
+
+    safeZone.startX = CONSTANTS.MAP_SIZE / 2; safeZone.startY = CONSTANTS.MAP_SIZE / 2;
+    safeZone.currentX = safeZone.startX; safeZone.currentY = safeZone.startY;
+    const endPos = getSafeSpawnPoint();
+    safeZone.endX = endPos.x; safeZone.endY = endPos.y;
+    safeZone.startR = CONSTANTS.MAP_SIZE * 0.8; safeZone.endR = 200; safeZone.currentR = safeZone.startR;
+    
+    addLog("자기장 생성! 안전 구역으로 이동하세요!");
+}
+
+function update(dt) {
+    if (gameState === 'END') return;
+    
+    if (hasFirstLanded) {
+        lootSpawnTimer -= dt;
+        if (lootSpawnTimer <= 0) {
+            spawnRandomLootBox();
+            lootSpawnTimer = CONSTANTS.LOOT_SPAWN_INTERVAL;
+        }
+        
+        if (!portal.active) {
+            portal.spawnTimer -= dt;
+            if (portal.spawnTimer <= 0) {
+                const pPos = getSafeSpawnPoint();
+                portal.x = pPos.x; portal.y = pPos.y;
+                portal.active = true;
+                portal.timer = CONSTANTS.PORTAL_DURATION;
+                portal.spawnTimer = CONSTANTS.PORTAL_SPAWN_TIME + Math.random() * 20;
+                addLog("초록색 웜홀 포탈이 생성되었습니다!");
+            }
+        } else {
+            portal.timer -= dt;
+            if (portal.timer <= 0) {
+                portal.active = false;
+                addLog("웜홀 포탈이 사라졌습니다.");
+            }
+            
+            // Check Collision with Portal (Player Only)
+            entities.forEach(e => {
+                if (e.isPlayer && e.alive && e.lootCount >= CONSTANTS.WIN_LOOT_COUNT) {
+                    const d = Math.hypot(e.x - portal.x, e.y - portal.y);
+                    if (d < portal.radius) {
+                        endGame(true, false, e);
+                    }
+                }
+            });
+        }
+    }
+
+    if (gameState === 'DROPPING') {
+        let allLanded = true;
+        entities.forEach(e => { if (e.z > 0) allLanded = false; });
+        if (player.z <= 0 && document.getElementById('dive-controls').style.display !== 'none') {
+            document.getElementById('dive-controls').style.display = 'none';
+        }
+        if (allLanded) startGroundPhase();
+    } else if (gameState === 'GROUND') {
+        gameTime -= dt;
+        if (gameTime <= 0) { gameTime = 0; endGame(true); }
+        document.getElementById('timer-display').innerText = Math.ceil(gameTime);
+
+        const progress = 1 - (gameTime / CONSTANTS.GROUND_TIME); 
+        safeZone.currentR = safeZone.startR + (safeZone.endR - safeZone.startR) * progress;
+        safeZone.currentX = safeZone.startX + (safeZone.endX - safeZone.startX) * progress;
+        safeZone.currentY = safeZone.startY + (safeZone.endY - safeZone.startY) * progress;
+    }
+
+    entities.forEach(e => e.update(dt));
+    updateLeaderboard();
+
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i]; b.update(dt); let hit = false;
+        entities.forEach(e => {
+            if (e.id !== b.ownerId && e.alive) {
+                const dist = Math.hypot(b.x - e.x, b.y - e.y);
+                const hitRadius = e.z > 0 ? e.radius + 10 : e.radius; 
+                if (dist < hitRadius) {
+                    e.takeDamage(b.damage, entities.find(ent => ent.id === b.ownerId));
+                    createParticles(e.x, e.y, '#ff0000', 3); hit = true;
+                }
+            }
+        });
+        if (hit || b.life <= 0 || b.x<0 || b.x>CONSTANTS.MAP_SIZE || b.y<0 || b.y>CONSTANTS.MAP_SIZE) bullets.splice(i, 1);
+    }
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].x += particles[i].vx * dt; particles[i].y += particles[i].vy * dt; particles[i].life -= dt;
+        if (particles[i].life <= 0) particles.splice(i, 1);
+    }
+
+    const targetZoom = 1 / (1 + (player.z / 300));
+    camera.zoom = targetZoom;
+    camera.x = player.x - (CANVAS.width/2)/camera.zoom;
+    camera.y = player.y - (CANVAS.height/2)/camera.zoom;
+
+    document.getElementById('altitude-display').innerText = `고도: ${Math.floor(player.z)}pt`;
+    document.getElementById('alive-counter').innerText = `생존: ${entities.filter(e=>e.alive).length}`;
+    document.getElementById('kill-counter').innerText = `킬: ${player.kills}`;
+}
+
+function draw() {
+    CTX.fillStyle = '#D4A373'; CTX.fillRect(0, 0, CANVAS.width, CANVAS.height);
+    CTX.save();
+    CTX.translate(CANVAS.width/2, CANVAS.height/2); CTX.scale(camera.zoom, camera.zoom); CTX.translate(-player.x, -player.y);
+
+    CTX.strokeStyle = '#8D6E63'; CTX.lineWidth = 10; CTX.strokeRect(0, 0, CONSTANTS.MAP_SIZE, CONSTANTS.MAP_SIZE);
+    
+    // Draw Safe Zone
+    if (gameState === 'GROUND' && safeZone.currentR > 0) {
+        CTX.save(); CTX.beginPath();
+        CTX.rect(-1000, -1000, CONSTANTS.MAP_SIZE + 2000, CONSTANTS.MAP_SIZE + 2000);
+        CTX.arc(safeZone.currentX, safeZone.currentY, safeZone.currentR, 0, Math.PI*2, true);
+        CTX.fillStyle = 'rgba(0, 100, 255, 0.2)'; CTX.fill();
+        CTX.beginPath(); CTX.arc(safeZone.currentX, safeZone.currentY, safeZone.currentR, 0, Math.PI*2);
+        CTX.strokeStyle = 'rgba(255, 255, 255, 0.8)'; CTX.lineWidth = 5; CTX.stroke();
+        CTX.restore();
+    }
+
+    // Draw Portal
+    if (portal.active) {
+        CTX.save();
+        CTX.translate(portal.x, portal.y);
+        CTX.rotate(Date.now() / 500); // Spin effect
+        CTX.beginPath();
+        CTX.arc(0, 0, portal.radius, 0, Math.PI*2);
+        CTX.fillStyle = 'rgba(0, 255, 0, 0.3)';
+        CTX.fill();
+        CTX.strokeStyle = '#0f0';
+        CTX.lineWidth = 5;
+        CTX.setLineDash([10, 5]);
+        CTX.stroke();
+        CTX.restore();
+    }
+
+    craters.forEach(c => {
+        CTX.fillStyle = `rgba(0,0,0,${c.alpha * 0.4})`; CTX.beginPath(); CTX.arc(c.x, c.y, c.r, 0, Math.PI*2); CTX.fill();
+    });
+
+    mapObjects.forEach(obj => obj.draw(CTX));
+
+    if (gameState !== 'END') {
+        lootBoxes.forEach(box => {
+            if (!box.active) return;
+            CTX.save(); CTX.translate(box.x, box.y);
+            CTX.fillStyle = '#FFD700'; CTX.fillRect(-15, -15, 30, 30);
+            CTX.fillStyle = '#000'; CTX.font = '20px Arial'; CTX.textAlign='center'; CTX.textBaseline='middle';
+            CTX.fillText('?', 0, 0);
+            CTX.restore();
+        });
+    }
+
+    entities.sort((a, b) => a.z - b.z);
+    entities.forEach(e => {
+        if (!e.alive) {
+            CTX.fillStyle = '#5D4037'; CTX.beginPath(); CTX.arc(e.x, e.y, 10, 0, Math.PI*2); CTX.fill(); return;
+        }
+        CTX.fillStyle = 'rgba(0,0,0,0.4)'; CTX.beginPath();
+        let s = e.radius * (1 - e.z/2000); CTX.arc(e.x, e.y, Math.max(2, s), 0, Math.PI*2); CTX.fill();
+
+        CTX.save(); CTX.translate(e.x, e.y);
+        let sc = 1 + (e.z / 800); CTX.scale(sc, sc); CTX.rotate(e.angle);
+        
+        // Glow if enough loot (Only Player visual)
+        if (e.isPlayer && e.lootCount >= CONSTANTS.WIN_LOOT_COUNT) {
+            CTX.shadowBlur = 20;
+            CTX.shadowColor = '#0f0';
+        } else {
+            CTX.shadowBlur = 0;
+        }
+
+        CTX.fillStyle = e.color; CTX.beginPath(); CTX.arc(0, 0, e.radius, 0, Math.PI*2); CTX.fill();
+        CTX.shadowBlur = 0; // Reset
+
+        CTX.fillStyle = '#fff';
+        if (e.weapon === 'GUN') CTX.fillRect(10, -5, 20, 10);
+        else if (e.weapon === 'KNIFE') { CTX.beginPath(); CTX.moveTo(10,0); CTX.lineTo(30,0); CTX.lineWidth=4; CTX.strokeStyle='#CFD8DC'; CTX.stroke(); }
+        else if (e.weapon === 'SHIELD') { CTX.strokeStyle='#3F51B5'; CTX.lineWidth=4; CTX.beginPath(); CTX.arc(0,0,e.radius+8, -Math.PI/2, Math.PI/2); CTX.stroke(); }
+        else { CTX.beginPath(); CTX.arc(12,5,5,0,Math.PI*2); CTX.arc(12,-5,5,0,Math.PI*2); CTX.fill(); }
+        if (e.isDiving && e.z > 0) {
+            CTX.strokeStyle='rgba(255,255,255,0.5)'; CTX.lineWidth=2;
+            CTX.beginPath(); CTX.moveTo(-15,-15); CTX.lineTo(-30,-30); CTX.moveTo(-15,15); CTX.lineTo(-30,30); CTX.stroke();
+        }
+        CTX.restore();
+        CTX.fillStyle='#fff'; CTX.font='bold 12px Arial'; CTX.textAlign='center'; 
+        CTX.fillText(e.isPlayer?"나":`BOT`, e.x, e.y - 30*sc);
+        CTX.fillStyle='red'; CTX.fillRect(e.x-15, e.y-45*sc, 30, 4);
+        CTX.fillStyle='#0f0'; CTX.fillRect(e.x-15, e.y-45*sc, 30*(e.hp/e.maxHp), 4);
+    });
+
+    bullets.forEach(b => { CTX.fillStyle='#FFFF00'; CTX.beginPath(); CTX.arc(b.x, b.y, 4, 0, Math.PI*2); CTX.fill(); });
+    particles.forEach(p => { CTX.fillStyle=p.color; CTX.globalAlpha=p.life; CTX.beginPath(); CTX.arc(p.x, p.y, 3, 0, Math.PI*2); CTX.fill(); CTX.globalAlpha=1; });
+
+    CTX.restore();
+    drawMinimap(CTX);
+}
+
+function drawMinimap(ctx) {
+    const s=150, m=20, sc=s/CONSTANTS.MAP_SIZE;
+    ctx.save(); ctx.translate(m, m);
+    ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(0,0,s,s);
+    ctx.strokeStyle='rgba(255,255,255,0.8)'; ctx.lineWidth=2; ctx.strokeRect(0,0,s,s);
+    
+    if (gameState === 'GROUND') {
+        const sx = safeZone.currentX * sc; const sy = safeZone.currentY * sc; const sr = safeZone.currentR * sc;
+        ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI*2); ctx.strokeStyle = '#00f'; ctx.stroke();
+    }
+    
+    if (portal.active) {
+        ctx.fillStyle = '#0f0';
+        ctx.beginPath(); ctx.arc(portal.x * sc, portal.y * sc, 4, 0, Math.PI*2); ctx.fill();
+    }
+
+    if(player && player.alive) {
+        const px=player.x*sc, py=player.y*sc;
+        ctx.fillStyle='#00BFFF'; ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(px,py); ctx.arc(px,py,15, player.angle-0.6, player.angle+0.6); 
+        ctx.fillStyle='rgba(0,191,255,0.3)'; ctx.fill();
+    }
+    ctx.restore();
+}
+
+function updateLeaderboard() {
+    const container = document.getElementById('leaderboard-content');
+    const sorted = [...entities].sort((a, b) => {
+        if (a.alive && !b.alive) return -1; if (!a.alive && b.alive) return 1; return b.kills - a.kills;
+    });
+    let html = '';
+    sorted.forEach((e, idx) => {
+        const color = e.alive ? (e.isPlayer ? "text-yellow-300 font-bold" : "text-gray-100") : "text-gray-500 line-through";
+        html += `<div class="leaderboard-row ${color}"><span>${idx+1}. ${e.isPlayer?"나":"BOT "+e.id}</span><span>${e.kills}</span></div>`;
+    });
+    container.innerHTML = html;
+}
+
+function checkWinCondition() {
+    const aliveCount = entities.filter(e => e.alive).length;
+    if (!player.alive) endGame(false);
+    else if (aliveCount === 1) endGame(true, true);
+}
+
+function endGame(win, allDead = false, winnerEntity = null) {
+    gameState = 'END'; AudioSys.stopWind();
+    const p = document.getElementById('center-panel');
+    const t = p.querySelector('h1'); const d = p.querySelector('p');
+    p.style.display = 'flex'; document.getElementById('start-btn').innerText = "다시 하기";
+    
+    if (winnerEntity) {
+        const winnerName = winnerEntity.isPlayer ? "당신" : `BOT ${winnerEntity.id}`;
+        t.innerText = "PORTAL ESCAPE!";
+        t.className = "text-5xl font-bold text-green-400 mb-4";
+        d.innerText = `${winnerName}이(가) 웜홀을 통해 탈출했습니다!\n완벽한 승리!`;
+    } else if (!player.alive) {
+        t.innerText = "GAME OVER"; t.className = "text-5xl font-bold text-red-600 mb-4";
+        d.innerText = `사망했습니다.\n처치 수: ${player.kills}`;
+    } else {
+        t.innerText = allDead ? "WINNER WINNER!" : "TIME OVER";
+        t.className = allDead ? "text-5xl font-bold text-yellow-400 mb-4" : "text-5xl font-bold text-blue-400 mb-4";
+        d.innerText = allDead ? `최후의 1인! 처치: ${player.kills}` : `생존 성공! 처치: ${player.kills}`;
+    }
+}
+
+function updateHPBar() { 
+    if(player) { 
+        const b=document.getElementById('hp-bar'); 
+        const pct = (player.hp / player.maxHp) * 100;
+        b.style.width=`${pct}%`; 
+        b.className=pct<30?"bar-fill bg-red-600 animate-pulse":"bar-fill bg-green-500"; 
+    } 
+}
+function updateStaminaBar(v, f) { const b=document.getElementById('st-bar'); b.style.width=`${v}%`; b.className=f?"bar-fill bg-gray-400":"bar-fill bg-yellow-400"; }
+function createParticles(x, y, c, n) { for(let i=0; i<n; i++) particles.push({x:x, y:y, vx:(Math.random()-0.5)*200, vy:(Math.random()-0.5)*200, life:0.5+Math.random()*0.5, color:c}); }
+function addLog(m) { console.log(m); }
+
+function gameLoop() {
+    if (gameState === 'MENU') return;
+    const now = performance.now(); const dt = (now - lastTime) / 1000; lastTime = now;
+    update(dt); draw();
+    if (gameState !== 'END') requestAnimationFrame(gameLoop);
+}
+
+window.addEventListener('resize', ()=>{CANVAS.width=window.innerWidth; CANVAS.height=window.innerHeight;}); window.dispatchEvent(new Event('resize'));
+window.addEventListener('keydown', e=>{if(e.code==='KeyW'||e.key==='ArrowUp')keys.w=true; if(e.code==='KeyA'||e.key==='ArrowLeft')keys.a=true; if(e.code==='KeyS'||e.key==='ArrowDown')keys.s=true; if(e.code==='KeyD'||e.key==='ArrowRight')keys.d=true; if(e.code==='Space')keys.space=true; if(e.code.includes('Shift'))keys.shift=true;});
+window.addEventListener('keyup', e=>{if(e.code==='KeyW'||e.key==='ArrowUp')keys.w=false; if(e.code==='KeyA'||e.key==='ArrowLeft')keys.a=false; if(e.code==='KeyS'||e.key==='ArrowDown')keys.s=false; if(e.code==='KeyD'||e.key==='ArrowRight')keys.d=false; if(e.code==='Space')keys.space=false; if(e.code.includes('Shift'))keys.shift=false;});
+window.addEventListener('mousemove', e=>{mousePos.x=e.clientX; mousePos.y=e.clientY;});
+window.addEventListener('mousedown', ()=>keys.mouse=true); window.addEventListener('mouseup', ()=>keys.mouse=false);
+const db=document.getElementById('dive-btn'); 
+if(db){
+    db.addEventListener('mousedown', ()=>keys.shift=true); 
+    db.addEventListener('mouseup', ()=>keys.shift=false); 
+    db.addEventListener('touchstart', e=>{e.preventDefault();keys.shift=true;}); 
+    db.addEventListener('touchend', e=>{e.preventDefault();keys.shift=false;});
+}
+document.getElementById('start-btn').addEventListener('click', initGame);
+</script>
+</body>
+</html>
