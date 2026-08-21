@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/sim.test.mjs && node tests/renderer.test.mjs"
+    "test": "node tests/sim.test.mjs && node tests/renderer.test.mjs && node tests/layout.test.mjs"
   }
 }

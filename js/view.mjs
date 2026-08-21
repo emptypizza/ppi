@@ -1,7 +1,7 @@
 import { CONSTANTS } from './sim.mjs';
+import { DEFAULT_VIEW, layoutFor, worldZoom, cameraOffset } from './layout.mjs';
 
-/** Intended match view when the host has no layout size yet. */
-export const DEFAULT_VIEW = { width: 1280, height: 720 };
+export { DEFAULT_VIEW, layoutFor, worldZoom, cameraOffset } from './layout.mjs';
 
 function hex(color) {
     if (typeof color === 'number') return color;
@@ -52,8 +52,8 @@ export async function createMatchView(host, pixi, opts = {}) {
     const initOpts = {
         width,
         height,
-        background: 0xC48A58,
-        backgroundColor: 0xC48A58,
+        background: 0xC9966A,
+        backgroundColor: 0xC9966A,
         backgroundAlpha: 1,
         antialias: true,
         preference: 'webgl',
@@ -87,7 +87,7 @@ export async function createMatchView(host, pixi, opts = {}) {
 
     const view = new MatchView(app, pixi, width, height, surface);
     if (app.renderer && app.renderer.background) {
-        try { app.renderer.background.color = 0xC48A58; } catch (e) {}
+        try { app.renderer.background.color = 0xC9966A; } catch (e) {}
     }
     if (typeof app.start === 'function') app.start();
     if (typeof app.render === 'function') app.render();
@@ -100,6 +100,7 @@ export class MatchView {
         this.pixi = pixi;
         this.width = width;
         this.height = height;
+        this.layout = layoutFor(width, height);
         this.canvas = canvas || app.canvas || app.view;
         this.stage = app.stage;
         this.world = new pixi.Container();
@@ -135,8 +136,8 @@ export class MatchView {
         const G = this.pixi.Graphics;
         const g = new G();
         const size = CONSTANTS.MAP_SIZE;
-        g.rect(-200, -200, size + 400, size + 400);
-        g.fill({ color: 0xB07A4A });
+        g.rect(-size, -size, size * 3, size * 3);
+        g.fill({ color: 0xC9966A });
         g.rect(0, 0, size, size);
         g.fill({ color: 0xD4A373 });
         const step = 80;
@@ -155,15 +156,18 @@ export class MatchView {
 
     drawMinimapFrame() {
         const G = this.pixi.Graphics;
+        const size = this.layout.minimap.size;
+        const pad = this.layout.pad;
+        this.minimap.removeChildren();
         const g = new G();
-        g.rect(0, 0, 160, 160);
+        g.rect(0, 0, size, size);
         g.fill({ color: 0x000000, alpha: 0.55 });
-        g.rect(0, 0, 160, 160);
+        g.rect(0, 0, size, size);
         g.stroke({ width: 2, color: 0xffffff, alpha: 0.85 });
         this.minimap.addChild(g);
         this._mmWorld = new this.pixi.Container();
         this.minimap.addChild(this._mmWorld);
-        this.minimap.position.set(18, 18);
+        this.minimap.position.set(pad, pad);
         this._mmZone = new G();
         this._mmWorld.addChild(this._mmZone);
         this._mmPortal = new G();
@@ -203,6 +207,8 @@ export class MatchView {
     resize(width, height) {
         this.width = width;
         this.height = height;
+        this.layout = layoutFor(width, height);
+        this.drawMinimapFrame();
         if (this.canvas) {
             this.canvas.width = width;
             this.canvas.height = height;
@@ -243,9 +249,10 @@ export class MatchView {
         this._pulse += 0.08;
         const p = (snapshot.entities || []).find((e) => e.id === myId) || snapshot.entities[0];
         if (!p) return;
-        const zoom = 1 / (1 + (p.z / 300));
+        const zoom = worldZoom(this.width, this.height, p.z);
+        const cam = cameraOffset(this.width, this.height, p.x, p.y, zoom);
         this.world.scale.set(zoom, zoom);
-        this.world.position.set(this.width / 2 - p.x * zoom, this.height / 2 - p.y * zoom);
+        this.world.position.set(cam.x, cam.y);
 
         this._drawZone(snapshot);
         this._drawCraters(snapshot);
@@ -420,7 +427,7 @@ export class MatchView {
     }
 
     _drawMinimap(snapshot, p) {
-        const sc = 160 / CONSTANTS.MAP_SIZE;
+        const sc = this.layout.minimap.size / CONSTANTS.MAP_SIZE;
         this._mmZone.clear();
         if (snapshot.zone) {
             this._mmZone.circle(snapshot.zone.x * sc, snapshot.zone.y * sc, snapshot.zone.r * sc);

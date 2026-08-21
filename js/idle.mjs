@@ -147,6 +147,10 @@ export const Idle = {
     showHub(on) {
         const lab = document.getElementById('lab-panel');
         if (lab) lab.classList.toggle('open', on);
+        if (typeof document !== 'undefined' && document.body) {
+            document.body.classList.toggle('in-hub', !!on);
+            document.body.classList.toggle('in-match', !on);
+        }
     },
     refreshUI() {
         if (!this.save) return;

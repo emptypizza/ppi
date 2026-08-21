@@ -71,6 +71,13 @@ try {
     if (fill.frac < 0.5) throw new Error('surface not substantially filled frac=' + fill.frac);
     if (fill.bboxCover < 0.8) throw new Error('painted bbox too small cover=' + fill.bboxCover);
 
+    const labBox = await page.locator('#lab-panel').boundingBox();
+    log('lab hub', JSON.stringify(labBox));
+    if (!labBox) throw new Error('훈련소 not visible on hub');
+    if (labBox.width > INTENDED.width * 0.32 + 2) {
+        throw new Error('훈련소 width ' + labBox.width + ' > 32% of view');
+    }
+
     await page.locator('#start-btn').click();
     await page.waitForFunction(() => {
         const el = document.getElementById('center-panel');
@@ -87,6 +94,32 @@ try {
     const pressed1 = await auto.getAttribute('aria-pressed');
     log('auto pressed after click', pressed1);
     if (pressed1 !== 'true') throw new Error('click did not turn 자동전투 on');
+
+    const hud = await page.evaluate(() => {
+        const box = (id) => {
+            const el = document.getElementById(id);
+            if (!el) return null;
+            const b = el.getBoundingClientRect();
+            return { id, x: b.x, y: b.y, w: b.width, h: b.height, cx: b.x + b.width / 2, cy: b.y + b.height / 2 };
+        };
+        return {
+            vw: window.innerWidth,
+            vh: window.innerHeight,
+            minimap: box('hud-minimap'),
+            phase: box('hud-phase'),
+            topRight: box('hud-top-right'),
+            hp: box('hud-hp'),
+            auto: box('auto-btn')
+        };
+    });
+    log('hud', JSON.stringify(hud));
+    const { vw, vh } = hud;
+    if (hud.minimap.cx >= vw / 2 || hud.minimap.cy >= vh / 2) throw new Error('minimap not top-left');
+    if (hud.minimap.w > vh * 0.22) throw new Error('minimap too large');
+    if (Math.abs(hud.phase.cx - vw / 2) > vw * 0.12 || hud.phase.y > vh / 3) throw new Error('phase not top-center');
+    if (hud.topRight.cx <= vw / 2 || hud.topRight.cy >= vh / 2) throw new Error('leaderboard not top-right');
+    if (hud.hp.cx >= vw / 2 || hud.hp.cy <= vh / 2) throw new Error('HP not bottom-left');
+    if (!hud.auto || hud.auto.w < 8) throw new Error('자동전투 not visible');
 
     const before = await page.evaluate(() => {
         const c = document.querySelector('#game-root canvas');

@@ -1,6 +1,7 @@
 import { GameSim, CONSTANTS, WEAPONS } from './sim.mjs';
 import { Idle } from './idle.mjs';
 import { createMatchView } from './view.mjs';
+import { applyLayoutCss, layoutFor, worldZoom, cameraOffset } from './layout.mjs';
 
 const PIXI_URL = 'https://cdn.jsdelivr.net/npm/pixi.js@8.8.1/dist/pixi.min.mjs';
 const gameRoot = document.getElementById('game-root');
@@ -70,6 +71,7 @@ async function ensureView() {
     }
     const w = window.innerWidth;
     const h = window.innerHeight;
+    applyLayoutCss(document.documentElement, layoutFor(w, h));
     if (gameRoot) {
         gameRoot.style.width = w + 'px';
         gameRoot.style.height = h + 'px';
@@ -107,9 +109,10 @@ function readInput() {
     const px = p ? p.x : 0, py = p ? p.y : 0;
     const vw = matchView ? matchView.width : window.innerWidth;
     const vh = matchView ? matchView.height : window.innerHeight;
-    const zoom = 1 / (1 + ((p && p.z) || 0) / 300);
-    const wx = (mousePos.x - vw / 2) / zoom + px;
-    const wy = (mousePos.y - vh / 2) / zoom + py;
+    const zoom = worldZoom(vw, vh, (p && p.z) || 0);
+    const cam = cameraOffset(vw, vh, px, py, zoom);
+    const wx = (mousePos.x - cam.x) / zoom;
+    const wy = (mousePos.y - cam.y) / zoom;
     return {
         dx, dy,
         aim: Math.atan2(wy - py, wx - px),
@@ -444,6 +447,7 @@ function saveNick() {
 
 window.addEventListener('resize', () => {
     const w = window.innerWidth, h = window.innerHeight;
+    applyLayoutCss(document.documentElement, layoutFor(w, h));
     if (gameRoot) {
         gameRoot.style.width = w + 'px';
         gameRoot.style.height = h + 'px';
@@ -495,6 +499,7 @@ const nick = document.getElementById('nick-input');
 if (nick) nick.addEventListener('change', saveNick);
 
 Idle.init();
+applyLayoutCss(document.documentElement, layoutFor(window.innerWidth, window.innerHeight));
 ensureView().catch((err) => console.error('pixi boot', err));
 setInterval(() => Idle.tickHub(0.25), 250);
 document.addEventListener('visibilitychange', () => {

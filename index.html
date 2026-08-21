@@ -6,72 +6,180 @@
     <title>펍지키우기포지마스터</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #1a202c; color: white; user-select: none; }
+        :root {
+            --hud-pad: 16px;
+            --hud-minimap: 121px;
+            --hud-lab-w: 333px;
+            --hud-hp-w: 215px;
+            --hud-lb-w: 189px;
+        }
+        html, body { width: 100%; height: 100%; }
+        body { margin: 0; overflow: hidden; background-color: #C9966A; color: white; user-select: none; font-family: system-ui, sans-serif; }
         canvas { display: block; }
         #game-root { position: fixed; inset: 0; z-index: 0; }
-        #file-serve-help { display: none; position: fixed; inset: 0; z-index: 200; background: #1a202c; color: #eee; padding: 48px 24px; font-family: system-ui, sans-serif; }
+        #file-serve-help { display: none; position: fixed; inset: 0; z-index: 200; background: #1a202c; color: #eee; padding: 48px 24px; }
         #file-serve-help pre { background: #111; padding: 16px; border-radius: 8px; overflow: auto; }
-        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        #ui-layer { position: fixed; inset: 0; z-index: 20; pointer-events: none; }
         .pointer-events-auto { pointer-events: auto; }
-        .hud-text { text-shadow: 2px 2px 0 #000; font-weight: bold; }
-        .leaderboard-row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 12px; }
-        .bg-glass { background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px); }
-        .bar-container { background: rgba(0,0,0,0.5); border: 2px solid #fff; border-radius: 4px; overflow: hidden; }
+        .hud-text { text-shadow: 2px 2px 0 #000; font-weight: 800; }
+        .leaderboard-row { display: flex; justify-content: space-between; padding: 1px 0; font-size: 11px; }
+        .bg-glass { background: rgba(0, 0, 0, 0.55); }
+        .bar-container { background: rgba(0,0,0,0.5); border: 2px solid #fff; border-radius: 3px; overflow: hidden; }
         .bar-fill { height: 100%; transition: width 0.1s linear; }
-        
-        /* Blue Zone Hit Effect */
-        #damage-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; background: radial-gradient(circle, transparent 50%, rgba(0, 100, 255, 0.3) 100%); opacity: 0; transition: opacity 0.2s; }
-        #gold-bar { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 40; pointer-events: none; font-size: 15px; letter-spacing: 0.04em; color: #ffe082; }
-        #lab-panel { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); width: 320px; max-height: min(86vh, 720px); overflow: auto; z-index: 60; pointer-events: auto; background: rgba(8,10,14,0.94); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 14px; display: none; }
+
+        #damage-overlay { position: fixed; inset: 0; z-index: 15; pointer-events: none; background: radial-gradient(circle, transparent 50%, rgba(0, 100, 255, 0.3) 100%); opacity: 0; }
+        #gold-bar { position: fixed; top: var(--hud-pad); left: 50%; transform: translateX(-50%); z-index: 40; pointer-events: none; font-size: 13px; color: #ffe082; }
+        body.in-match #gold-bar { display: none; }
+        body.in-hub .hud-match { visibility: hidden; pointer-events: none; }
+
+        #hud-minimap {
+            position: absolute;
+            left: var(--hud-pad);
+            top: var(--hud-pad);
+            width: var(--hud-minimap);
+            height: var(--hud-minimap);
+            pointer-events: none;
+        }
+        #hud-phase {
+            position: absolute;
+            left: 50%;
+            top: var(--hud-pad);
+            transform: translateX(-50%);
+            text-align: center;
+            width: 28%;
+            max-width: 360px;
+        }
+        #phase-text { font-size: 15px; margin-bottom: 2px; }
+        #timer-display { font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; }
+        #hud-phase .sub { font-size: 12px; margin-top: 4px; opacity: 0.9; }
+
+        #hud-top-right {
+            position: absolute;
+            right: var(--hud-pad);
+            top: var(--hud-pad);
+            width: var(--hud-lb-w);
+            text-align: right;
+        }
+        #hud-top-right .meta { font-size: 12px; line-height: 1.35; margin-bottom: 6px; }
+        #leaderboard { padding: 6px 8px; border-radius: 6px; }
+
+        #hud-hp {
+            position: absolute;
+            left: var(--hud-pad);
+            bottom: var(--hud-pad);
+            width: var(--hud-hp-w);
+        }
+        #hud-hp .lbl { font-size: 11px; margin-bottom: 2px; }
+        #hud-hp .bar-container.hp { height: 10px; margin-bottom: 6px; }
+        #hud-hp .bar-container.st { height: 6px; }
+
+        #hud-actions {
+            position: absolute;
+            right: var(--hud-pad);
+            bottom: var(--hud-pad);
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+        }
+
+        #lab-panel {
+            position: fixed;
+            right: var(--hud-pad);
+            top: var(--hud-pad);
+            width: var(--hud-lab-w);
+            max-width: 32%;
+            max-height: calc(100% - 2 * var(--hud-pad));
+            overflow: auto;
+            z-index: 60;
+            pointer-events: auto;
+            background: rgba(8,10,14,0.94);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px;
+            padding: 10px 12px;
+            display: none;
+            box-sizing: border-box;
+        }
         #lab-panel.open { display: block; }
-        #lab-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
-        #lab-header .title { font-weight: 800; font-size: 16px; color: #b9f6ca; }
-        #lab-gold { color: #ffd54f; font-weight: 800; }
-        #lab-stage { font-size: 12px; color: #90caf9; margin-bottom: 10px; }
-        .upg-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
-        .upg-row .meta { font-size: 12px; line-height: 1.35; }
-        .upg-row .meta b { font-size: 13px; }
-        .upg-row button { min-width: 72px; padding: 6px 8px; border-radius: 6px; font-weight: 700; font-size: 12px; }
+        body.in-match #lab-panel { display: none !important; }
+        #lab-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+        #lab-header .title { font-weight: 800; font-size: 14px; color: #b9f6ca; }
+        #lab-gold { color: #ffd54f; font-weight: 800; font-size: 13px; }
+        #lab-stage { font-size: 11px; color: #90caf9; margin-bottom: 8px; }
+        .upg-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; background: rgba(255,255,255,0.05); border-radius: 6px; padding: 5px 8px; margin-bottom: 4px; }
+        .upg-row .meta { font-size: 11px; line-height: 1.3; }
+        .upg-row .meta b { font-size: 12px; }
+        .upg-row button { min-width: 58px; padding: 4px 6px; border-radius: 5px; font-weight: 700; font-size: 11px; }
         .upg-row button.ok { background: #2e7d32; }
         .upg-row button.no { background: #5d2a2a; opacity: 0.7; }
         .upg-row button.max { background: #333; }
-        #lab-skins { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-        #lab-skins button { padding: 5px 8px; border-radius: 6px; font-size: 11px; background: #333; }
+        #lab-skins { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+        #lab-skins button { padding: 4px 6px; border-radius: 5px; font-size: 10px; background: #333; }
         #lab-skins button.on { outline: 2px solid #64b5f6; }
         #lab-skins button:disabled { opacity: 0.4; }
-        #lab-stats { font-size: 11px; color: #9e9e9e; margin-top: 10px; }
-        #offline-popup { position: absolute; inset: 0; z-index: 80; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.72); pointer-events: auto; }
+        #lab-stats { font-size: 10px; color: #9e9e9e; margin-top: 8px; }
+
+        #center-panel {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            z-index: 50;
+            background: rgba(0,0,0,0.45);
+        }
+        body.in-hub #center-panel { right: calc(var(--hud-lab-w) + var(--hud-pad)); background: rgba(0,0,0,0.28); }
+        #center-card {
+            width: min(420px, 90%);
+            text-align: center;
+            background: rgba(10,12,16,0.88);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 12px;
+            padding: 22px 24px 20px;
+        }
+        #center-card h1 { font-size: 28px; margin: 0 0 10px; }
+        #center-card > p { font-size: 13px; line-height: 1.45; color: #d1d5db; margin: 0 0 14px; }
+        #nick-input { padding: 8px 12px; border-radius: 6px; width: 200px; text-align: center; color: #111; margin-bottom: 10px; }
+        #start-btn { padding: 10px 28px; background: #d97706; color: #fff; font-weight: 800; border-radius: 8px; font-size: 18px; }
+        #start-btn:hover { background: #f59e0b; }
+        #net-hint { font-size: 11px; color: #9ca3af; margin-top: 8px; }
+
+        #offline-popup { position: fixed; inset: 0; z-index: 80; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.72); pointer-events: auto; }
         #offline-popup.open { display: flex; }
-        #offline-card { width: min(420px, 90vw); background: #1b1e24; border-radius: 12px; padding: 28px 24px; text-align: center; }
-        #offline-card h2 { color: #ffd54f; font-size: 22px; margin-bottom: 10px; }
-        #offline-card p { white-space: pre-line; margin-bottom: 18px; color: #eee; }
-        #offline-card button { background: #2e7d32; padding: 10px 28px; border-radius: 8px; font-weight: 800; }
+        #offline-card { width: min(380px, 90vw); background: #1b1e24; border-radius: 12px; padding: 24px 20px; text-align: center; }
+        #offline-card h2 { color: #ffd54f; font-size: 20px; margin-bottom: 8px; }
+        #offline-card p { white-space: pre-line; margin-bottom: 16px; color: #eee; }
+        #offline-card button { background: #2e7d32; padding: 8px 24px; border-radius: 8px; font-weight: 800; }
+
         #auto-btn {
             pointer-events: auto;
-            min-width: 120px;
-            padding: 10px 18px;
+            min-width: 88px;
+            padding: 6px 12px;
             border-radius: 999px;
             font-weight: 800;
-            font-size: 15px;
-            letter-spacing: 0.02em;
+            font-size: 12px;
             border: 2px solid #6b7280;
             background: rgba(17, 24, 39, 0.88);
             color: #d1d5db;
-            box-shadow: 0 2px 0 #111;
         }
         #auto-btn:hover { filter: brightness(1.12); }
         #auto-btn[aria-pressed="true"], #auto-btn.on {
             border-color: #69f0ae;
             background: #1b5e20;
             color: #b9f6ca;
-            box-shadow: 0 0 14px rgba(105, 240, 174, 0.5);
+            box-shadow: 0 0 10px rgba(105, 240, 174, 0.45);
         }
+        #dive-controls { display: none; flex-direction: column; align-items: center; }
+        #dive-controls .hint { font-size: 10px; margin-bottom: 4px; }
+        #dive-btn { width: 56px; height: 56px; border-radius: 999px; background: rgba(37,99,235,0.85); border: 3px solid #60a5fa; font-weight: 800; font-size: 11px; line-height: 1.15; }
         @media (max-width: 900px) {
-            #lab-panel { right: 8px; left: 8px; width: auto; top: auto; bottom: 8px; transform: none; max-height: 42vh; }
+            #lab-panel { right: 8px; left: 8px; width: auto; max-width: none; top: auto; bottom: 8px; max-height: 36vh; }
+            body.in-hub #center-panel { right: 0; }
         }
     </style>
 </head>
-<body>
+<body class="in-hub">
 
 <div id="file-serve-help">
     <h1>이 파일로는 실행하지 않습니다</h1>
@@ -82,70 +190,59 @@
 <div id="damage-overlay"></div>
 <div id="gold-bar" class="hud-text">STAGE 1 · 40 G</div>
 
-<div id="ui-layer" class="flex flex-col justify-between p-4">
-    <!-- Top HUD -->
-    <div class="flex justify-between items-start w-full">
-        <div style="width: 160px; height: 160px;"></div> <!-- Minimap Placeholder -->
-        <div class="flex flex-col items-center pt-2">
-            <div id="phase-text" class="text-xl hud-text text-yellow-400 mb-1">공중 강하 준비</div>
-            <div id="timer-display" class="text-4xl hud-text font-mono">10.0</div>
-            <div class="mt-2 text-sm hud-text opacity-80">
-                <span id="alive-counter">생존: 10</span> | <span id="kill-counter" class="text-red-400">킬: 0</span>
-            </div>
+<div id="ui-layer">
+    <div id="hud-minimap" class="hud-match"></div>
+    <div id="hud-phase" class="hud-match">
+        <div id="phase-text" class="hud-text text-yellow-400">공중 강하 준비</div>
+        <div id="timer-display" class="hud-text font-mono">10.0</div>
+        <div class="sub hud-text">
+            <span id="alive-counter">생존: 10</span> | <span id="kill-counter" class="text-red-400">킬: 0</span>
         </div>
-        <div class="flex flex-col items-end gap-2">
-            <div class="hud-text text-right">
-                <div id="altitude-display">고도: 1000pt</div>
-                <div id="weapon-display" class="text-blue-300">무기: 없음</div>
-                <div id="loot-count-display" class="text-green-400 font-bold">파밍: 0 / 7</div>
+    </div>
+    <div id="hud-top-right" class="hud-match">
+        <div class="meta hud-text">
+            <div id="altitude-display">고도: 1000pt</div>
+            <div id="weapon-display" class="text-blue-300">무기: 없음</div>
+            <div id="loot-count-display" class="text-green-400">파밍: 0 / 7</div>
+        </div>
+        <div id="leaderboard" class="bg-glass pointer-events-auto">
+            <div class="text-xs font-bold text-gray-400 border-b border-gray-600 mb-1 pb-1 flex justify-between">
+                <span>플레이어</span>
+                <span>킬</span>
             </div>
-            <div id="leaderboard" class="bg-glass p-3 rounded w-48 text-gray-200 shadow-lg pointer-events-auto">
-                <div class="text-xs font-bold text-gray-400 border-b border-gray-600 mb-1 pb-1 flex justify-between">
-                    <span>플레이어</span>
-                    <span>킬</span>
-                </div>
-                <div id="leaderboard-content"></div>
-            </div>
+            <div id="leaderboard-content"></div>
+        </div>
+    </div>
+    <div id="hud-hp" class="hud-match">
+        <div class="lbl hud-text">HP</div>
+        <div class="bar-container hp">
+            <div id="hp-bar" class="bar-fill bg-green-500" style="width: 100%;"></div>
+        </div>
+        <div class="lbl hud-text">STAMINA</div>
+        <div class="bar-container st">
+            <div id="st-bar" class="bar-fill bg-yellow-400" style="width: 100%;"></div>
+        </div>
+    </div>
+    <div id="hud-actions" class="hud-match">
+        <button id="auto-btn" type="button" aria-pressed="false" aria-label="자동전투">자동전투</button>
+        <div id="dive-controls">
+            <div class="hint hud-text text-yellow-300">SHIFT: 급강하</div>
+            <button id="dive-btn" type="button">수직<br>강하</button>
         </div>
     </div>
 
-    <!-- Center Panel -->
-    <div id="center-panel" class="absolute inset-0 flex items-center justify-center pointer-events-auto bg-black/70 z-50">
-        <div class="text-center">
-            <h1 class="text-5xl font-bold text-green-500 mb-4 drop-shadow-lg">펍지키우기포지마스터</h1>
-            <p class="text-gray-300 mb-6 max-w-md mx-auto">
+    <div id="center-panel">
+        <div id="center-card">
+            <h1 class="font-bold text-green-500">펍지키우기포지마스터</h1>
+            <p>
                 1. <b>통합 조작</b>: 강하/달리기 모두 <b>SHIFT</b> 키 사용.<br>
                 2. 상자 <b>7개</b>를 먹고 <b>초록 웜홀</b>로 탈출하면 스테이지가 오릅니다.<br>
                 3. 자기장은 초당 90. 골드로는 오른쪽 <b>훈련소</b>에서 영구 강화.
             </p>
-            <input id="nick-input" maxlength="12" placeholder="닉네임" class="pointer-events-auto mb-4 px-4 py-2 rounded text-black w-56 text-center" />
-            <button id="start-btn" class="px-8 py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded text-xl shadow-lg transform transition hover:scale-105">
-                게임 시작
-            </button>
-            <p id="net-hint" class="text-xs text-gray-400 mt-3">바로 시작. 나 + 봇 9.</p>
-        </div>
-    </div>
-
-    <!-- Bottom Controls -->
-    <div class="flex justify-between items-end mb-4">
-        <div class="w-48">
-            <div class="text-sm mb-1 hud-text">HP</div>
-            <div class="bar-container h-4 w-full mb-2">
-                <div id="hp-bar" class="bar-fill bg-green-500" style="width: 100%;"></div>
-            </div>
-            <div class="text-sm mb-1 hud-text">STAMINA</div>
-            <div class="bar-container h-2 w-full">
-                <div id="st-bar" class="bar-fill bg-yellow-400" style="width: 100%;"></div>
-            </div>
-        </div>
-        <div class="flex flex-col items-center gap-3 pointer-events-auto">
-            <button id="auto-btn" type="button" aria-pressed="false" aria-label="자동전투">자동전투</button>
-            <div id="dive-controls" class="hidden flex-col items-center">
-                <div class="text-sm mb-1 animate-pulse text-yellow-300">SHIFT 홀드: 급강하</div>
-                <button id="dive-btn" class="w-24 h-24 rounded-full bg-blue-600/80 border-4 border-blue-400 flex items-center justify-center active:bg-blue-800 transition">
-                    <span class="font-bold text-lg">수직<br>강하</span>
-                </button>
-            </div>
+            <input id="nick-input" maxlength="12" placeholder="닉네임" class="pointer-events-auto" />
+            <br>
+            <button id="start-btn" type="button">게임 시작</button>
+            <p id="net-hint">바로 시작. 나 + 봇 9.</p>
         </div>
     </div>
 </div>
