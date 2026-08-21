@@ -146,11 +146,15 @@ export const Idle = {
     },
     showHub(on) {
         const lab = document.getElementById('lab-panel');
-        if (lab) lab.classList.toggle('open', on);
+        if (lab && !on) lab.classList.remove('open');
         if (typeof document !== 'undefined' && document.body) {
             document.body.classList.toggle('in-hub', !!on);
             document.body.classList.toggle('in-match', !on);
         }
+        try {
+            const mm = window.__ppi && window.__ppi.view && window.__ppi.view.minimap;
+            if (mm) mm.visible = !on;
+        } catch (e) {}
     },
     refreshUI() {
         if (!this.save) return;

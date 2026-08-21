@@ -77,6 +77,7 @@ async function ensureView() {
         gameRoot.style.height = h + 'px';
     }
     matchView = await createMatchView(gameRoot, pixiMod, { width: w, height: h });
+    if (matchView.minimap) matchView.minimap.visible = !document.body.classList.contains('in-hub');
     window.__ppi = { view: matchView, pixi: pixiMod };
     return matchView;
 }
@@ -139,7 +140,7 @@ function hideMenu() {
     document.getElementById('center-panel').style.display = 'none';
     document.getElementById('dive-controls').style.display = 'flex';
     document.getElementById('phase-text').innerText = '공중 강하!';
-    document.getElementById('phase-text').className = 'text-xl hud-text text-yellow-400 mb-1';
+    document.getElementById('phase-text').className = 'hud-text text-yellow-400';
     Idle.showHub(false);
     Idle.playing = true;
     settled = false;

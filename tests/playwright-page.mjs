@@ -71,12 +71,14 @@ try {
     if (fill.frac < 0.5) throw new Error('surface not substantially filled frac=' + fill.frac);
     if (fill.bboxCover < 0.8) throw new Error('painted bbox too small cover=' + fill.bboxCover);
 
-    const labBox = await page.locator('#lab-panel').boundingBox();
-    log('lab hub', JSON.stringify(labBox));
-    if (!labBox) throw new Error('훈련소 not visible on hub');
-    if (labBox.width > INTENDED.width * 0.32 + 2) {
-        throw new Error('훈련소 width ' + labBox.width + ' > 32% of view');
+    const overlay = await page.locator('#center-panel').boundingBox();
+    log('start overlay', JSON.stringify(overlay));
+    if (!overlay || overlay.width < INTENDED.width * 0.95) {
+        throw new Error('start overlay is not full-bleed');
     }
+    const labVisible = await page.locator('#lab-panel').isVisible();
+    log('lab visible on start', labVisible);
+    if (labVisible) throw new Error('훈련소 should not cover the start overlay');
 
     await page.locator('#start-btn').click();
     await page.waitForFunction(() => {
